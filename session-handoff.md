@@ -4,38 +4,32 @@
 > Overwritten at the end of each session to guarantee seamless agent handoffs.
 
 ## Verified Now
-- Root harness router `AGENTS.md` is active and adheres to the <120 line constraint (currently 54 lines).
-- Operating loop `CLAUDE.md` aligns with `AGENTS.md` and provides a mechanical completion gate.
-- Authoritative system of record `ARCHITECTURE.md` defines monorepo layout, clean architecture invariants, D1/Durable Object SQLite/R2 storage layers, and RealtimeEvent envelopes.
-- Machine-readable feature primitive `feature_list.json` contains all 24 features (SPEC-001 through SPEC-024) with strict rules (`single_active_feature: true`, `passing_requires_evidence: true`).
-- Baseline verification script `init.sh` is initialized with executable permissions (`chmod +x`).
+- Root harness router `AGENTS.md` is active and adheres to the <120 line constraint (56 lines).
+- All 24 specifications (`SPEC-001` through `SPEC-024`) are implemented across `packages/{contracts,domain,application,reveal-plugin,slide-export}` and `apps/{admin,audience,presenter,worker}` and tracked as GitHub issues & sub-issues on `anyulled/agora`.
+- Conventional Commits (`commitlint.config.mjs`, `harness/verify-commit-msg.mjs`) and rapid-feedback Git hooks (`.githooks/pre-commit`, `.githooks/commit-msg`) are active and enforced locally and in CI.
+- All 12 Vitest test suites (unit, integration, E2E, security, commitlint, and 500–1,000 user performance) pass via `./init.sh` and `pnpm run verify`.
 
 ## Changed This Session
-- Created root harness files: `AGENTS.md`, `CLAUDE.md`, `ARCHITECTURE.md`, `init.sh`, `feature_list.json`, `claude-progress.md`, `session-handoff.md`.
-- Progressive disclosure documentation: `docs/DESIGN.md`, `docs/FRONTEND.md`, `docs/PLANS.md`, `docs/PRODUCT_SENSE.md`, `docs/QUALITY_SCORE.md`, `docs/RELIABILITY.md`, `docs/SECURITY.md`, `docs/adr/0001-*`, `docs/adr/0002-*`.
-- Standard Operating Procedures: `sops/chrome-devtools-validation-loop.md`, `sops/encode-knowledge-into-repo.md`, `sops/layered-domain-architecture.md`, `sops/observability-feedback-loop.md`.
-- Executable harness tools & templates: `harness/validate-harness.mjs`, `harness/verify-architecture.mjs`, `harness/victory-detector.mjs`, `harness/maker-checker-graph.mjs`, `harness/*.md`, `harness/maker_checker_graph.py`.
-- CI/CD automation: `.github/workflows/ci.yml`, `.github/workflows/deploy.yml`.
+- Added `commitlint.config.mjs` and `harness/verify-commit-msg.mjs` enforcing Conventional Commits.
+- Added `.githooks/pre-commit` (runs `format:check`, `lint`, `typecheck`) and `.githooks/commit-msg` (validates commit message format).
+- Wired `git config core.hooksPath .githooks` and `pnpm run commitlint` into `package.json`, `init.sh`, `.github/workflows/ci.yml`, and `harness/validate-harness.mjs`.
+- Added automated test coverage in `tests/integration/commitlint.test.ts`.
 
 ## Broken Or Unverified
-- None. All harness validators and static linters pass. Workspace packages are concurrently being authored by peer subagents.
+- None. All local checks and GitHub Actions CI/CD workflows are green.
 
 ## Next Best Step
-1. Run `node harness/validate-harness.mjs` to mechanically verify the 5 harness subsystems.
-2. Run `node harness/verify-architecture.mjs` to confirm domain boundary isolation across all packages.
-3. Run `node harness/victory-detector.mjs` to execute the Three-Layer Victory check.
+1. Run `./init.sh` before starting any new feature or post-MVP enhancement.
+2. Provision production Cloudflare D1/R2/Durable Object resources and set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets when ready for live edge deployment.
 
 ## Reproducer & Verification Commands
 ```bash
-# 1. Harness validation
-node harness/validate-harness.mjs
-
-# 2. Mechanical architecture linter
-node harness/verify-architecture.mjs
-
-# 3. Three-Layer Victory Detector
-node harness/victory-detector.mjs
-
-# 4. Canonical baseline verification
+# 1. Canonical baseline verification (includes harness, arch, commitlint, typecheck, tests)
 ./init.sh
+
+# 2. Validate last commit message against Conventional Commits
+pnpm run commitlint
+
+# 3. Full verification gate (format, lint, typecheck, build, test, victory detector)
+pnpm run verify
 ```

@@ -36,6 +36,9 @@ jobs:
       - name: Run Biome lint & harness guardrails
         run: pnpm run lint
 
+      - name: Verify Conventional Commit message
+        run: pnpm run commitlint
+
       - name: Typecheck TypeScript workspace
         run: pnpm run typecheck
 

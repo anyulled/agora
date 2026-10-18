@@ -27,14 +27,20 @@ if ! command -v pnpm >/dev/null 2>&1; then
 fi
 echo "    Node: $(node -v) | pnpm: $(pnpm -v)"
 
-# 2. Dependency Resolution (Non-destructive)
-echo "--> [2/6] Verifying workspace dependencies..."
+# 2. Dependency Resolution & Git Hooks Setup (Non-destructive)
+echo "--> [2/6] Verifying workspace dependencies & git hooks..."
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  git config core.hooksPath .githooks || true
+fi
 pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 
 # 3. Mechanical Harness Verification (Practices 2, 4, 7, 8, 10)
 echo "--> [3/6] Running mechanical harness checks..."
 node harness/validate-harness.mjs
 node harness/verify-architecture.mjs
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+  node harness/verify-commit-msg.mjs --last
+fi
 
 # 4. Strict Typecheck
 echo "--> [4/6] Running TypeScript typecheck..."

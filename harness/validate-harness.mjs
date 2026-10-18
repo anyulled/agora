@@ -35,10 +35,14 @@ const requiredSubsystemFiles = [
   // Subsystem 4: Progress Ledger
   'claude-progress.md',
   'session-handoff.md',
-  // Subsystem 5: Mechanical Linters & Guardrails
+  // Subsystem 5: Mechanical Linters, Git Hooks & Guardrails
+  'commitlint.config.mjs',
   'harness/validate-harness.mjs',
   'harness/verify-architecture.mjs',
+  'harness/verify-commit-msg.mjs',
   'harness/victory-detector.mjs',
+  '.githooks/pre-commit',
+  '.githooks/commit-msg',
 ];
 
 console.log('--> Checking 5 Harness Subsystems...');

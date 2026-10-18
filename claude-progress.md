@@ -32,3 +32,19 @@
   - `feature_list.json`: valid JSON containing 24 distinct SPEC entries with non-empty verification and evidence.
 - **Next Session Focus**:
   - Run `validate-harness.mjs`, `verify-architecture.mjs`, and `victory-detector.mjs` against full monorepo packages as other subagents finalize their components.
+
+---
+
+## Session 002 — 2026-10-18
+- **Role**: Fast Commitlint & Hooks Builder (`flash_lite`)
+- **Goals**:
+  1. Enforce Conventional Commits (`<type>(<scope>): <subject>`) via `commitlint.config.mjs` and `harness/verify-commit-msg.mjs`.
+  2. Configure rapid-feedback Git hooks (`.githooks/pre-commit` and `.githooks/commit-msg`) via `core.hooksPath`.
+  3. Integrate commit linting into `init.sh`, `package.json`, `.github/workflows/ci.yml`, `harness/validate-harness.mjs`, and automated integration tests (`tests/integration/commitlint.test.ts`).
+- **Completed**:
+  - Added `commitlint.config.mjs` and `harness/verify-commit-msg.mjs` supporting `--last`, `--message`, and commit-msg hook file paths.
+  - Added `.githooks/pre-commit` (format, lint, typecheck) and `.githooks/commit-msg` (Conventional Commits check) and wired `git config core.hooksPath .githooks` into `init.sh` and `pnpm prepare`.
+  - Added `tests/integration/commitlint.test.ts` testing valid/invalid commit messages and hook scripts.
+- **Verification Evidence**:
+  - `./init.sh` and `pnpm run verify`: 12 test suites, all passing, 0 lint/format/typecheck errors.
+

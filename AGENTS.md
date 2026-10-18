@@ -16,6 +16,7 @@ Run this sequence before taking any task action:
 - **ACID Progress Updates**: Whenever you modify code, update `feature_list.json` and `claude-progress.md` atomically in the same step.
 - **Passing Requires Evidence**: A feature cannot be marked `passing` without a non-empty `verification` command list and concrete `evidence` log entry.
 - **Pure Domain Boundary**: `packages/domain` and `packages/application` MUST NEVER import Cloudflare Workers, React, DOM, or Reveal.js (`verify-architecture.mjs`).
+- **Conventional Commits & Git Hooks**: All commits MUST follow Conventional Commits (`<type>(<scope>): <subject>`) enforced by `.githooks/commit-msg` (`harness/verify-commit-msg.mjs`) and `.githooks/pre-commit`.
 - **No Hallucinated Pass**: Never claim a test or check passed without running it and inspecting the return code and stdout/stderr.
 
 ## 3. Progressive Disclosure Index

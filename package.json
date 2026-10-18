@@ -8,7 +8,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm --parallel -r dev",
-    "typecheck": "tsc --build tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "biome lint . && node harness/verify-architecture.mjs && node harness/validate-harness.mjs",
     "format": "biome format --write .",
     "format:check": "biome format .",
@@ -19,6 +19,8 @@
     "test:perf": "vitest run tests/performance/",
     "test:e2e": "vitest run tests/e2e/",
     "verify": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && node harness/victory-detector.mjs",
+    "prepare": "git config core.hooksPath .githooks || true",
+    "commitlint": "node harness/verify-commit-msg.mjs --last",
     "harness:validate": "node harness/validate-harness.mjs",
     "harness:arch": "node harness/verify-architecture.mjs",
     "harness:victory": "node harness/victory-detector.mjs",
