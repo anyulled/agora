@@ -59,6 +59,9 @@ importers:
       '@agora/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@agora/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
 
   packages/application:
     dependencies:

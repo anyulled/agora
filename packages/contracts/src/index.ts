@@ -15,12 +15,23 @@ export interface PresentationBranding {
   logoAssetId?: string;
 }
 
+export interface PresentationRevisionStatus {
+  presentationId: string;
+  revision: string;
+  revisionHash: string;
+  assetCount: number;
+  staleAssetCount: number;
+  isCurrent: boolean;
+}
+
 export interface Presentation {
   id: string;
   title: string;
   description?: string;
   eventName?: string;
   revision: string;
+  revisionHash?: string;
+  revisionStatus?: PresentationRevisionStatus;
   status: PresentationStatus;
   endingSlideId: string;
   branding: PresentationBranding;

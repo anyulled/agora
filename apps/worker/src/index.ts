@@ -10,6 +10,8 @@ import {
   type PollOption,
   type PollResultsSummary,
   type Presentation,
+  type PresentationBranding,
+  type PresentationRevisionStatus,
   type PresentationSession,
   type Reaction,
   type ReactionCounts,
@@ -19,14 +21,16 @@ import {
   type WordCloudAggregate,
   type WordCloudPrompt,
 } from '@agora/contracts';
+import { bumpRevision, computePresentationRevisionHash } from '@agora/domain';
+import type { LocalD1Database, LocalR2Bucket } from './cloudflare-emulator';
 
 export * from './cloudflare-emulator';
 
 export interface WorkerEnv {
   ADMIN_TOKEN?: string;
   ENVIRONMENT?: string;
-  DB?: unknown;
-  ASSETS_BUCKET?: unknown;
+  DB?: LocalD1Database | unknown;
+  ASSETS_BUCKET?: LocalR2Bucket | unknown;
   SESSION_COORDINATOR?: unknown;
 }
 
@@ -291,7 +295,229 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     };
   }
 
-  async function handleRequest(request: Request, _env?: WorkerEnv): Promise<Response> {
+  function asD1(env?: WorkerEnv): LocalD1Database | null {
+    const db = env?.DB as LocalD1Database | undefined;
+    return db && typeof db.prepare === 'function' ? db : null;
+  }
+
+  function asR2(env?: WorkerEnv): LocalR2Bucket | null {
+    const r2 = env?.ASSETS_BUCKET as LocalR2Bucket | undefined;
+    return r2 && typeof r2.put === 'function' ? r2 : null;
+  }
+
+  function validatePresentationPayload(
+    body: Partial<Presentation>,
+    isCreate: boolean,
+  ): string | null {
+    if (body.title !== undefined) {
+      if (typeof body.title !== 'string' || sanitizeText(body.title).length === 0) {
+        return 'Invalid presentation payload: title must be a non-empty string';
+      }
+    } else if (isCreate && Object.keys(body).length === 0) {
+      // Allow default fallback only when caller omits title on minimal create, unless explicitly invalid
+    }
+    if (body.status !== undefined && body.status !== 'draft' && body.status !== 'published') {
+      return "Invalid presentation payload: status must be 'draft' or 'published'";
+    }
+    if (body.slides !== undefined) {
+      if (!Array.isArray(body.slides)) {
+        return 'Invalid presentation payload: slides must be an array';
+      }
+      for (const s of body.slides) {
+        if (
+          !s ||
+          typeof s.id !== 'string' ||
+          !s.id.trim() ||
+          typeof s.title !== 'string' ||
+          typeof s.horizontalIndex !== 'number' ||
+          typeof s.verticalIndex !== 'number' ||
+          typeof s.order !== 'number'
+        ) {
+          return 'Invalid slide metadata in slides array';
+        }
+      }
+    }
+    return null;
+  }
+
+  function computeRevisionStatus(
+    presentation: Presentation,
+    allAssets: AssetManifestEntry[],
+  ): PresentationRevisionStatus {
+    const currentAssets = allAssets.filter((a) => a.revision === presentation.revision);
+    const staleAssets = allAssets.filter((a) => a.revision !== presentation.revision);
+    const hash =
+      presentation.revisionHash ||
+      computePresentationRevisionHash({
+        title: presentation.title,
+        description: presentation.description,
+        eventName: presentation.eventName,
+        endingSlideId: presentation.endingSlideId,
+        branding: presentation.branding,
+        slides: presentation.slides || [],
+      });
+
+    return {
+      presentationId: presentation.id,
+      revision: presentation.revision,
+      revisionHash: hash,
+      assetCount: currentAssets.length,
+      staleAssetCount: staleAssets.length,
+      isCurrent: staleAssets.length === 0,
+    };
+  }
+
+  async function persistPresentationToD1(
+    env: WorkerEnv | undefined,
+    presentation: Presentation,
+    slides: SlideMetadata[],
+  ): Promise<void> {
+    const db = asD1(env);
+    if (!db) return;
+
+    await db
+      .prepare(
+        `INSERT OR REPLACE INTO presentations
+         (id, title, description, event_name, revision, revision_hash, status, ending_slide_id, branding_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        presentation.id,
+        presentation.title,
+        presentation.description ?? null,
+        presentation.eventName ?? null,
+        presentation.revision,
+        presentation.revisionHash ?? '',
+        presentation.status,
+        presentation.endingSlideId,
+        JSON.stringify(presentation.branding || { colors: {} }),
+        presentation.createdAt || new Date().toISOString(),
+        presentation.updatedAt || new Date().toISOString(),
+      )
+      .run();
+
+    await db.prepare('DELETE FROM slides WHERE presentation_id = ?').bind(presentation.id).run();
+    if (slides.length > 0) {
+      await db.batch(
+        slides.map((s) =>
+          db
+            .prepare(
+              `INSERT INTO slides (id, presentation_id, title, horizontal_index, vertical_index, slide_order, is_qa_slide)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .bind(
+              s.id,
+              presentation.id,
+              s.title,
+              s.horizontalIndex,
+              s.verticalIndex,
+              s.order,
+              s.isQaSlide ? 1 : 0,
+            ),
+        ),
+      );
+    }
+  }
+
+  async function hydratePresentationFromD1(
+    env: WorkerEnv | undefined,
+    id: string,
+  ): Promise<Presentation | null> {
+    const inMem = store.presentations.get(id);
+    if (inMem) return inMem;
+
+    const db = asD1(env);
+    if (!db) return null;
+
+    const row = await db
+      .prepare('SELECT * FROM presentations WHERE id = ?')
+      .bind(id)
+      .first<Record<string, unknown>>();
+    if (!row) return null;
+
+    const slideRows = await db
+      .prepare('SELECT * FROM slides WHERE presentation_id = ? ORDER BY slide_order ASC')
+      .bind(id)
+      .all<Record<string, unknown>>();
+
+    const slides: SlideMetadata[] = slideRows.results.map((r) => ({
+      id: String(r.id),
+      presentationId: String(r.presentation_id),
+      title: String(r.title),
+      horizontalIndex: Number(r.horizontal_index),
+      verticalIndex: Number(r.vertical_index),
+      order: Number(r.slide_order),
+      isQaSlide: Boolean(r.is_qa_slide),
+    }));
+
+    const branding = JSON.parse(
+      String(row.branding_json || '{"colors":{}}'),
+    ) as PresentationBranding;
+    const presentation: Presentation = {
+      id: String(row.id),
+      title: String(row.title),
+      description: row.description ? String(row.description) : undefined,
+      eventName: row.event_name ? String(row.event_name) : undefined,
+      revision: String(row.revision),
+      revisionHash: row.revision_hash ? String(row.revision_hash) : undefined,
+      status: (row.status as Presentation['status']) || 'draft',
+      endingSlideId: String(row.ending_slide_id),
+      branding,
+      slides,
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    };
+
+    const assetRows = await db
+      .prepare('SELECT * FROM asset_manifests WHERE presentation_id = ?')
+      .bind(id)
+      .all<Record<string, unknown>>();
+    const assets: AssetManifestEntry[] = assetRows.results.map((a) => ({
+      assetId: String(a.asset_id),
+      presentationId: String(a.presentation_id),
+      revision: String(a.revision),
+      kind: a.kind as AssetManifestEntry['kind'],
+      slideId: a.slide_id ? String(a.slide_id) : undefined,
+      r2Key: String(a.r2_key),
+      contentType: String(a.content_type),
+      byteSize: Number(a.byte_size),
+      createdAt: String(a.created_at),
+    }));
+
+    store.presentations.set(id, presentation);
+    store.slides.set(id, slides);
+    store.assets.set(id, assets);
+    return presentation;
+  }
+
+  async function purgeStaleAssets(
+    env: WorkerEnv | undefined,
+    presentationId: string,
+    newRevision: string,
+  ): Promise<void> {
+    const existingAssets = store.assets.get(presentationId) || [];
+    const staleAssets = existingAssets.filter((a) => a.revision !== newRevision);
+    const validAssets = existingAssets.filter((a) => a.revision === newRevision);
+    store.assets.set(presentationId, validAssets);
+
+    const r2 = asR2(env);
+    for (const stale of staleAssets) {
+      store.assetBlobs.delete(stale.r2Key);
+      if (r2) {
+        await r2.delete(stale.r2Key);
+      }
+    }
+
+    const db = asD1(env);
+    if (db) {
+      await db
+        .prepare('DELETE FROM asset_manifests WHERE presentation_id = ? AND revision != ?')
+        .bind(presentationId, newRevision)
+        .run();
+    }
+  }
+
+  async function handleRequest(request: Request, env?: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method.toUpperCase();
@@ -302,11 +528,16 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         status: 204,
         headers: {
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
           'Access-Control-Allow-Headers':
             'Content-Type, Authorization, x-admin-token, x-presenter-token, x-participant-token, x-confirm-destroy',
         },
       });
+    }
+
+    // 0. GET /api/v1/presentations (List all presentations)
+    if (method === 'GET' && path === '/api/v1/presentations') {
+      return jsonResponse(Array.from(store.presentations.values()));
     }
 
     // 1. POST /api/v1/presentations (Admin)
@@ -315,25 +546,58 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         return errorResponse('Unauthorized: Admin authentication required', 401);
       }
 
-      const body = (await request.json().catch(() => ({}))) as Partial<Presentation>;
+      const rawBody = await request.json().catch(() => null);
+      if (rawBody === null || typeof rawBody !== 'object') {
+        return errorResponse('Invalid JSON request body', 400);
+      }
+      const body = rawBody as Partial<Presentation>;
+      const validationErr = validatePresentationPayload(body, true);
+      if (validationErr) {
+        return errorResponse(validationErr, 400);
+      }
+
       const id = body.id || `pres-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const slides: SlideMetadata[] = (body.slides || []).map((s) => ({
+        ...s,
+        presentationId: id,
+        title: sanitizeText(s.title),
+      }));
+      const branding: PresentationBranding = {
+        colors: { ...(body.branding?.colors ?? {}) },
+        logoAssetId: body.branding?.logoAssetId,
+      };
+      const title = sanitizeText(body.title || 'Untitled Presentation');
+      const description = body.description ? sanitizeText(body.description) : undefined;
+      const eventName = body.eventName ? sanitizeText(body.eventName) : undefined;
+      const endingSlideId = body.endingSlideId || 'slide-ending';
+      const now = new Date().toISOString();
+
       const presentation: Presentation = {
         id,
-        title: sanitizeText(body.title || 'Untitled Presentation'),
-        description: body.description ? sanitizeText(body.description) : undefined,
-        eventName: body.eventName ? sanitizeText(body.eventName) : undefined,
+        title,
+        description,
+        eventName,
         revision: 'rev-1',
+        revisionHash: computePresentationRevisionHash({
+          title,
+          description,
+          eventName,
+          endingSlideId,
+          branding,
+          slides,
+        }),
         status: body.status || 'draft',
-        endingSlideId: body.endingSlideId || 'slide-ending',
-        branding: body.branding || { colors: {} },
-        slides: body.slides || [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        endingSlideId,
+        branding,
+        slides,
+        createdAt: now,
+        updatedAt: now,
       };
 
       store.presentations.set(id, presentation);
-      store.slides.set(id, presentation.slides || []);
+      store.slides.set(id, slides);
       store.assets.set(id, []);
+      await persistPresentationToD1(env, presentation, slides);
       return jsonResponse(presentation, 201);
     }
 
@@ -341,56 +605,88 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     const presMatch = path.match(/^\/api\/v1\/presentations\/([^/]+)$/);
     if (method === 'GET' && presMatch) {
       const id = presMatch[1]!;
-      const presentation = store.presentations.get(id);
+      const presentation = await hydratePresentationFromD1(env, id);
       if (!presentation) {
         return errorResponse('Presentation not found', 404);
       }
+      const slides = store.slides.get(id) || [];
+      const assets = store.assets.get(id) || [];
+      const revisionStatus = computeRevisionStatus({ ...presentation, slides }, assets);
       return jsonResponse({
         ...presentation,
-        slides: store.slides.get(id) || [],
+        slides,
+        revisionHash: revisionStatus.revisionHash,
+        revisionStatus,
       });
     }
 
-    // 3. PATCH /api/v1/presentations/:id (Admin)
-    if (method === 'PATCH' && presMatch) {
+    // 3. PUT & PATCH /api/v1/presentations/:id (Admin)
+    if ((method === 'PATCH' || method === 'PUT') && presMatch) {
       if (!authorizeAdmin(request)) {
         return errorResponse('Unauthorized: Admin authentication required', 401);
       }
       const id = presMatch[1]!;
-      const existing = store.presentations.get(id);
+      const existing = await hydratePresentationFromD1(env, id);
       if (!existing) {
         return errorResponse('Presentation not found', 404);
       }
 
-      const body = (await request.json().catch(() => ({}))) as Partial<Presentation>;
-      // Bump revision on slide or content edit
-      const currentRevNumber = Number.parseInt(existing.revision.replace(/\D/g, '') || '1', 10);
-      const newRevision = `rev-${currentRevNumber + 1}`;
+      const rawBody = await request.json().catch(() => null);
+      if (rawBody === null || typeof rawBody !== 'object') {
+        return errorResponse('Invalid JSON request body', 400);
+      }
+      const body = rawBody as Partial<Presentation>;
+      const validationErr = validatePresentationPayload(body, false);
+      if (validationErr) {
+        return errorResponse(validationErr, 400);
+      }
+
+      const newRevision = bumpRevision(existing.revision);
+      const updatedSlides = body.slides
+        ? body.slides.map((s) => ({ ...s, presentationId: id, title: sanitizeText(s.title) }))
+        : store.slides.get(id) || existing.slides || [];
+      const updatedBranding: PresentationBranding = body.branding
+        ? { colors: { ...(body.branding.colors ?? {}) }, logoAssetId: body.branding.logoAssetId }
+        : {
+            colors: { ...(existing.branding?.colors ?? {}) },
+            logoAssetId: existing.branding?.logoAssetId,
+          };
+
+      const updatedTitle = body.title ? sanitizeText(body.title) : existing.title;
+      const updatedDescription =
+        body.description !== undefined ? sanitizeText(body.description) : existing.description;
+      const updatedEventName =
+        body.eventName !== undefined ? sanitizeText(body.eventName) : existing.eventName;
+      const updatedEndingSlideId = body.endingSlideId || existing.endingSlideId;
 
       const updated: Presentation = {
         ...existing,
-        title: body.title ? sanitizeText(body.title) : existing.title,
-        description:
-          body.description !== undefined ? sanitizeText(body.description) : existing.description,
-        eventName: body.eventName !== undefined ? sanitizeText(body.eventName) : existing.eventName,
+        title: updatedTitle,
+        description: updatedDescription,
+        eventName: updatedEventName,
         status: body.status || existing.status,
-        endingSlideId: body.endingSlideId || existing.endingSlideId,
-        branding: body.branding || existing.branding,
+        endingSlideId: updatedEndingSlideId,
+        branding: updatedBranding,
+        slides: updatedSlides,
         revision: newRevision,
+        revisionHash: computePresentationRevisionHash({
+          title: updatedTitle,
+          description: updatedDescription,
+          eventName: updatedEventName,
+          endingSlideId: updatedEndingSlideId,
+          branding: updatedBranding,
+          slides: updatedSlides,
+        }),
         updatedAt: new Date().toISOString(),
       };
 
-      if (body.slides) {
-        updated.slides = body.slides;
-        store.slides.set(id, body.slides);
-      }
-
-      // Invalidate stale assets: keep only assets matching the new revision
-      const existingAssets = store.assets.get(id) || [];
-      const validAssets = existingAssets.filter((a) => a.revision === newRevision);
-      store.assets.set(id, validAssets);
-
+      store.slides.set(id, updatedSlides);
       store.presentations.set(id, updated);
+
+      // Invalidate & purge stale assets in memory, D1, and R2
+      await purgeStaleAssets(env, id, newRevision);
+      await persistPresentationToD1(env, updated, updatedSlides);
+
       return jsonResponse(updated);
     }
 
@@ -419,49 +715,77 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       }
 
       const id = presMatch[1]!;
-      if (!store.presentations.has(id)) {
+      const existing = await hydratePresentationFromD1(env, id);
+      if (!existing) {
         return errorResponse('Presentation not found', 404);
       }
 
+      await purgeStaleAssets(env, id, '__deleted__');
       store.presentations.delete(id);
       store.slides.delete(id);
       store.assets.delete(id);
       store.navigationRules.delete(id);
+
+      const db = asD1(env);
+      if (db) {
+        await db.prepare('DELETE FROM presentations WHERE id = ?').bind(id).run();
+      }
+
       return jsonResponse({ ok: true, deleted: id });
     }
 
-    // 5. POST /api/v1/presentations/:id/duplicate (Admin)
+    // 5. POST /api/v1/presentations/:id/duplicate (Admin, SPEC-017)
     const dupMatch = path.match(/^\/api\/v1\/presentations\/([^/]+)\/duplicate$/);
     if (method === 'POST' && dupMatch) {
       if (!authorizeAdmin(request)) {
         return errorResponse('Unauthorized: Admin authentication required', 401);
       }
       const sourceId = dupMatch[1]!;
-      const source = store.presentations.get(sourceId);
+      const source = await hydratePresentationFromD1(env, sourceId);
       if (!source) {
         return errorResponse('Source presentation not found', 404);
       }
 
+      const dupBody = (await request.json().catch(() => ({}))) as { title?: string };
       const targetId = `pres-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const sourceSlides = store.slides.get(sourceId) || [];
       const clonedSlides: SlideMetadata[] = sourceSlides.map((s) => ({
         ...s,
         presentationId: targetId,
       }));
+      const clonedBranding: PresentationBranding = {
+        colors: { ...(source.branding?.colors ?? {}) },
+        logoAssetId: source.branding?.logoAssetId,
+      };
+      const dupTitle = dupBody.title ? sanitizeText(dupBody.title) : `${source.title} (Copy)`;
+      const now = new Date().toISOString();
 
       const duplicated: Presentation = {
-        ...source,
         id: targetId,
-        title: `${source.title} (Copy)`,
+        title: dupTitle,
+        description: source.description,
+        eventName: source.eventName,
         revision: 'rev-1',
+        revisionHash: computePresentationRevisionHash({
+          title: dupTitle,
+          description: source.description,
+          eventName: source.eventName,
+          endingSlideId: source.endingSlideId,
+          branding: clonedBranding,
+          slides: clonedSlides,
+        }),
+        status: 'draft',
+        endingSlideId: source.endingSlideId,
+        branding: clonedBranding,
         slides: clonedSlides,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: now,
+        updatedAt: now,
       };
 
       store.presentations.set(targetId, duplicated);
       store.slides.set(targetId, clonedSlides);
       store.assets.set(targetId, []);
+      await persistPresentationToD1(env, duplicated, clonedSlides);
       return jsonResponse(duplicated, 201);
     }
 
@@ -472,7 +796,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         return errorResponse('Unauthorized: Admin authentication required', 401);
       }
       const presentationId = assetMatch[1]!;
-      const presentation = store.presentations.get(presentationId);
+      const presentation = await hydratePresentationFromD1(env, presentationId);
       if (!presentation) {
         return errorResponse('Presentation not found', 404);
       }
@@ -504,6 +828,13 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         }
       }
 
+      if (revision !== presentation.revision) {
+        return errorResponse(
+          `Revision mismatch: asset revision '${revision}' does not match current presentation revision '${presentation.revision}'`,
+          409,
+        );
+      }
+
       const assetId = `asset-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const r2Key = `presentations/${presentationId}/${revision}/${assetKind}/${slideId ? `${slideId}.png` : 'deck.pdf'}`;
 
@@ -524,6 +855,32 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       store.assets.set(presentationId, existingAssets);
       store.assetBlobs.set(r2Key, { bytes: rawBytes, contentType: entry.contentType });
 
+      const r2 = asR2(env);
+      if (r2) {
+        await r2.put(r2Key, rawBytes, { httpMetadata: { contentType: entry.contentType } });
+      }
+      const db = asD1(env);
+      if (db) {
+        await db
+          .prepare(
+            `INSERT OR REPLACE INTO asset_manifests
+             (asset_id, presentation_id, revision, kind, slide_id, r2_key, content_type, byte_size, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            entry.assetId,
+            entry.presentationId,
+            entry.revision,
+            entry.kind,
+            entry.slideId ?? null,
+            entry.r2Key,
+            entry.contentType,
+            entry.byteSize,
+            entry.createdAt,
+          )
+          .run();
+      }
+
       return jsonResponse(entry, 201);
     }
 
@@ -534,7 +891,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         return errorResponse('Unauthorized: Admin authentication required', 401);
       }
       const presentationId = sessionCreateMatch[1]!;
-      const presentation = store.presentations.get(presentationId);
+      const presentation = await hydratePresentationFromD1(env, presentationId);
       if (!presentation) {
         return errorResponse('Presentation not found', 404);
       }

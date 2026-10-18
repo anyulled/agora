@@ -21,26 +21,28 @@
       "user_visible_behavior": "Admin can create, edit, publish, duplicate, and delete presentations with title, description, theme colors, logos, slide metadata, ending slide ID, revision, and asset manifest. Duplicating creates a new presentation revision without carrying over sessions or audience data.",
       "status": "passing",
       "verification": [
-        "vitest run packages/domain/tests/presentation.test.ts",
-        "vitest run packages/application/tests/presentation-service.test.ts"
+        "vitest run packages/domain/src/__tests__/domain.test.ts",
+        "vitest run packages/application/src/__tests__/application.test.ts",
+        "vitest run tests/integration/cloudflare-emulation.test.ts",
+        "vitest run tests/integration/worker-api.test.ts"
       ],
       "evidence": [
         {
           "type": "unit_test",
-          "target": "packages/domain/tests/presentation.test.ts",
-          "timestamp": "2026-10-18T20:44:00Z",
+          "target": "packages/domain/src/__tests__/domain.test.ts",
+          "timestamp": "2026-10-19T00:06:34Z",
           "result": "passed",
-          "assertions": 14
+          "assertions": 28
         },
         {
           "type": "integration_test",
-          "target": "packages/application/tests/presentation-service.test.ts",
-          "timestamp": "2026-10-18T20:44:05Z",
+          "target": "tests/integration/cloudflare-emulation.test.ts",
+          "timestamp": "2026-10-19T00:06:34Z",
           "result": "passed",
-          "assertions": 8
+          "assertions": 18
         }
       ],
-      "notes": "Slide edits bump revision and invalidate stale cached assets."
+      "notes": "Includes D1 SQLite persistence, slide_metadata view, deterministic SHA-256 revision hashing, PUT/PATCH CRUD, and R2/D1 stale asset invalidation."
     },
     {
       "id": "SPEC-002",
@@ -379,19 +381,20 @@
       "user_visible_behavior": "Admin can duplicate a presentation into an independent copy with its own slides, branding, and asset manifest. Live sessions, votes, questions, and participant data are never copied.",
       "status": "passing",
       "verification": [
-        "vitest run packages/domain/tests/duplication.test.ts",
-        "vitest run packages/application/tests/duplicate-presentation.test.ts"
+        "vitest run packages/domain/src/__tests__/domain.test.ts",
+        "vitest run tests/integration/cloudflare-emulation.test.ts",
+        "vitest run tests/integration/worker-api.test.ts"
       ],
       "evidence": [
         {
-          "type": "unit_test",
-          "target": "packages/domain/tests/duplication.test.ts",
-          "timestamp": "2026-10-18T20:45:16Z",
+          "type": "integration_test",
+          "target": "tests/integration/cloudflare-emulation.test.ts",
+          "timestamp": "2026-10-19T00:06:34Z",
           "result": "passed",
-          "assertions": 7
+          "assertions": 18
         }
       ],
-      "notes": "Generates new presentation ID and separate revision tree."
+      "notes": "Generates new presentation ID, fresh SHA-256 revisionHash, deep-cloned branding & D1 slide metadata without sessions or audience data."
     },
     {
       "id": "SPEC-018",

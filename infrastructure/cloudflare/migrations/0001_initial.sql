@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS presentations (
   description TEXT,
   event_name TEXT,
   revision TEXT NOT NULL,
+  revision_hash TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'draft',
   ending_slide_id TEXT NOT NULL,
   branding_json TEXT NOT NULL DEFAULT '{}',
@@ -17,17 +18,29 @@ CREATE TABLE IF NOT EXISTS presentations (
 );
 
 CREATE TABLE IF NOT EXISTS slides (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL,
   presentation_id TEXT NOT NULL,
   title TEXT NOT NULL,
   horizontal_index INTEGER NOT NULL,
   vertical_index INTEGER NOT NULL,
   slide_order INTEGER NOT NULL,
   is_qa_slide INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (presentation_id, id),
   FOREIGN KEY (presentation_id) REFERENCES presentations(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_slides_presentation ON slides (presentation_id);
+
+CREATE VIEW IF NOT EXISTS slide_metadata AS
+SELECT
+  id,
+  presentation_id,
+  title,
+  horizontal_index,
+  vertical_index,
+  slide_order AS "order",
+  is_qa_slide
+FROM slides;
 
 CREATE TABLE IF NOT EXISTS asset_manifests (
   asset_id TEXT PRIMARY KEY,

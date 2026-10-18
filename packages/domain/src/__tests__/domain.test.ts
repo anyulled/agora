@@ -198,10 +198,37 @@ describe('Domain Logic — SPEC-001 through SPEC-024', () => {
       expect(dup.presentation.id).toBe('pres-dup-1');
       expect(dup.presentation.title).toBe('Cloudflare Architectures (Copy)');
       expect(dup.presentation.revision).toBe('rev-1');
+      expect(dup.presentation.revisionHash).toMatch(/^sha256:[0-9a-f]{64}$/);
       expect(dup.presentation.status).toBe('draft');
       expect(dup.presentation.endingSlideId).toBe('slide-ending');
       expect(dup.slides[0]?.presentationId).toBe('pres-dup-1');
       expect(dup.presentation.branding.colors.primary).toBe('#f6821f');
+    });
+
+    it('computes deterministic SHA-256 revision hash and changes hash when slide content or sequence changes (SPEC-001b)', () => {
+      const presA = createPresentation({
+        id: 'pres-hash-1',
+        title: 'Deterministic Deck',
+        endingSlideId: 'slide-2',
+        branding: { colors: { primary: '#112233', accent: '#445566' } },
+        slides: sampleSlides,
+      });
+      const presB = createPresentation({
+        id: 'pres-hash-2',
+        title: 'Deterministic Deck',
+        endingSlideId: 'slide-2',
+        branding: { colors: { accent: '#445566', primary: '#112233' } },
+        slides: sampleSlides,
+      });
+
+      expect(presA.revisionHash).toMatch(/^sha256:[0-9a-f]{64}$/);
+      expect(presA.revisionHash).toBe(presB.revisionHash);
+
+      const edited = editPresentationSlide(presA, undefined, {
+        ...sampleSlides[0]!,
+        title: 'Modified Slide Title',
+      });
+      expect(edited.presentation.revisionHash).not.toBe(presA.revisionHash);
     });
   });
 

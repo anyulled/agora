@@ -118,3 +118,20 @@
 - **Verification Evidence**:
   - `pnpm run lint:dup`: `1.7% total duplication <= 10% threshold; 0 files > 10%`.
   - `./init.sh` and `pnpm run verify`: 13/13 test suites (130 tests) passing.
+
+---
+
+## Session 008 — 2026-10-19
+- **Role**: Phase 1 Foundations Engineer (`SPEC-001`, `SPEC-001a`, `SPEC-001b`, `SPEC-017`)
+- **Goals**:
+  1. Implement pure deterministic SHA-256 revision hashing (`computePresentationRevisionHash`, `sha256Hex`) in `@agora/domain` and `PresentationRevisionStatus` in `@agora/contracts` (`#5 SPEC-001b`).
+  2. Add `revision_hash` column, composite `(presentation_id, id)` primary key on `slides`, and `slide_metadata` view to D1 SQL migrations (`#4 SPEC-001a`, `#5 SPEC-001b`).
+  3. Wire full `LocalD1Database` (`env.DB`) and `LocalR2Bucket` (`env.ASSETS_BUCKET`) persistence, runtime request validation, `PUT` + `PATCH` presentation updates, `409 Conflict` revision-mismatch protection, stale R2/D1 asset purging, and deep-cloned D1 duplication (`#3 SPEC-001`, `#27 SPEC-017`) into `apps/worker/src/index.ts`.
+- **Completed**:
+  - Added `sha256Hex` and `computePresentationRevisionHash` to `packages/domain/src/index.ts` (zero external imports, preserving pure domain boundaries).
+  - Updated `infrastructure/cloudflare/schema.sql` and `infrastructure/cloudflare/migrations/0001_initial.sql` with `revision_hash` and `slide_metadata` view.
+  - Wired `persistPresentationToD1`, `hydratePresentationFromD1`, `purgeStaleAssets`, runtime validation, and R2/D1 asset manifest management in `apps/worker/src/index.ts`.
+  - Expanded unit & integration tests in `packages/domain/src/__tests__/domain.test.ts` and `tests/integration/cloudflare-emulation.test.ts`.
+- **Verification Evidence**:
+  - `./init.sh` and `pnpm run verify`: 13/13 test suites (131 tests) passing, 0 ESLint/Biome/typecheck errors, `1.7%` code duplication (`<= 10%`).
+

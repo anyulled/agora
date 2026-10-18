@@ -155,23 +155,50 @@ describe('Cloudflare Local Emulation Integration Tests', () => {
     doNs.closeAll();
   });
 
-  it('createLocalCloudflareEnv wires DB, ASSETS_BUCKET, and SESSION_COORDINATOR with createAgoraWorkerApp', async () => {
+  it('createLocalCloudflareEnv wires DB, ASSETS_BUCKET, and SESSION_COORDINATOR with createAgoraWorkerApp (SPEC-001a, SPEC-001b, SPEC-017)', async () => {
     const env = createLocalCloudflareEnv({ persistDir: tmpDir, adminToken: 'local-secret' });
     const app = createAgoraWorkerApp({ adminToken: env.ADMIN_TOKEN });
+    const headers = {
+      Authorization: `Bearer ${env.ADMIN_TOKEN}`,
+      'Content-Type': 'application/json',
+    };
+
+    // Runtime validation rejects empty title with 400
+    const badRes = await app.fetch(
+      new Request('http://localhost/api/v1/presentations', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ title: '   ' }),
+      }),
+      env,
+    );
+    expect(badRes.status).toBe(400);
 
     const createRes = await app.fetch(
       new Request('http://localhost/api/v1/presentations', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${env.ADMIN_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           title: 'Cloudflare Emulated Presentation',
           endingSlideId: 's2',
+          branding: { colors: { primary: '#f6821f' } },
           slides: [
-            { id: 's1', title: 'Intro', horizontalIndex: 0, verticalIndex: 0, order: 0 },
-            { id: 's2', title: 'End', horizontalIndex: 1, verticalIndex: 0, order: 1 },
+            {
+              id: 's1',
+              presentationId: 'p',
+              title: 'Intro',
+              horizontalIndex: 0,
+              verticalIndex: 0,
+              order: 0,
+            },
+            {
+              id: 's2',
+              presentationId: 'p',
+              title: 'End',
+              horizontalIndex: 1,
+              verticalIndex: 0,
+              order: 1,
+            },
           ],
         }),
       }),
@@ -179,6 +206,105 @@ describe('Cloudflare Local Emulation Integration Tests', () => {
     );
 
     expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as {
+      id: string;
+      revision: string;
+      revisionHash: string;
+    };
+    expect(created.revision).toBe('rev-1');
+    expect(created.revisionHash).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    // Verify slide_metadata view in D1 SQLite (SPEC-001b)
+    const d1Slides = await env.DB.prepare(
+      'SELECT id, title, "order" FROM slide_metadata WHERE presentation_id = ? ORDER BY "order" ASC',
+    )
+      .bind(created.id)
+      .all<{ id: string; title: string; order: number }>();
+    expect(d1Slides.results).toEqual([
+      { id: 's1', title: 'Intro', order: 0 },
+      { id: 's2', title: 'End', order: 1 },
+    ]);
+
+    // Upload PNG asset to R2 & D1 manifest for rev-1
+    const assetRes = await app.fetch(
+      new Request(`http://localhost/api/v1/presentations/${created.id}/assets?slideId=s1`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          kind: 'slide-png',
+          slideId: 's1',
+          revision: 'rev-1',
+          base64: btoa('png-bytes'),
+        }),
+      }),
+      env,
+    );
+    expect(assetRes.status).toBe(201);
+    const uploadedAsset = (await assetRes.json()) as { r2Key: string };
+    expect(await env.ASSETS_BUCKET.head(uploadedAsset.r2Key)).not.toBeNull();
+
+    // Update via PUT /api/v1/presentations/:id -> bumps revision, changes revisionHash, and purges stale R2/D1 assets
+    const putRes = await app.fetch(
+      new Request(`http://localhost/api/v1/presentations/${created.id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          title: 'Cloudflare Emulated Presentation v2',
+        }),
+      }),
+      env,
+    );
+    expect(putRes.status).toBe(200);
+    const updated = (await putRes.json()) as { revision: string; revisionHash: string };
+    expect(updated.revision).toBe('rev-2');
+    expect(updated.revisionHash).not.toBe(created.revisionHash);
+
+    // Stale R2 object was purged on revision change
+    expect(await env.ASSETS_BUCKET.head(uploadedAsset.r2Key)).toBeNull();
+
+    // Uploading an asset with stale revision rev-1 returns 409 Conflict
+    const staleUploadRes = await app.fetch(
+      new Request(`http://localhost/api/v1/presentations/${created.id}/assets?slideId=s1`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          kind: 'slide-png',
+          slideId: 's1',
+          revision: 'rev-1',
+          base64: btoa('stale-png'),
+        }),
+      }),
+      env,
+    );
+    expect(staleUploadRes.status).toBe(409);
+
+    // Duplicate presentation (SPEC-017) persists in D1 and isolates mutations
+    const dupRes = await app.fetch(
+      new Request(`http://localhost/api/v1/presentations/${created.id}/duplicate`, {
+        method: 'POST',
+        headers,
+      }),
+      env,
+    );
+    expect(dupRes.status).toBe(201);
+    const duplicated = (await dupRes.json()) as { id: string; title: string; revisionHash: string };
+    expect(duplicated.id).not.toBe(created.id);
+
+    // Simulate Worker restart with fresh app instance reading from persisted D1
+    const restartedApp = createAgoraWorkerApp({ adminToken: env.ADMIN_TOKEN });
+    const getHydratedRes = await restartedApp.fetch(
+      new Request(`http://localhost/api/v1/presentations/${duplicated.id}`),
+      env,
+    );
+    expect(getHydratedRes.status).toBe(200);
+    const hydrated = (await getHydratedRes.json()) as {
+      id: string;
+      revisionStatus: { isCurrent: boolean; revisionHash: string };
+    };
+    expect(hydrated.id).toBe(duplicated.id);
+    expect(hydrated.revisionStatus.isCurrent).toBe(true);
+    expect(hydrated.revisionStatus.revisionHash).toBe(duplicated.revisionHash);
+
     env.close();
   });
 });

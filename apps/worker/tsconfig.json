@@ -3,7 +3,8 @@
   "compilerOptions": {
     "outDir": "dist",
     "paths": {
-      "@agora/contracts": ["../../packages/contracts/src/index.ts"]
+      "@agora/contracts": ["../../packages/contracts/src/index.ts"],
+      "@agora/domain": ["../../packages/domain/src/index.ts"]
     }
   },
   "include": ["src/**/*"]

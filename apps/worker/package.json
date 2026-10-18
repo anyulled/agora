@@ -8,7 +8,8 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@agora/contracts": "workspace:*"
+    "@agora/contracts": "workspace:*",
+    "@agora/domain": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
