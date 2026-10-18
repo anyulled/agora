@@ -135,3 +135,19 @@
 - **Verification Evidence**:
   - `./init.sh` and `pnpm run verify`: 13/13 test suites (131 tests) passing, 0 ESLint/Biome/typecheck errors, `1.7%` code duplication (`<= 10%`).
 
+---
+
+## Session 009 — 2026-10-19
+- **Role**: Mermaid Diagram Validator & Mechanical Harness Engineer
+- **Goals**:
+  1. Install and register `@rtuin/mcp-mermaid-validator` in the MCP configuration (`~/.gemini/config/mcp_config.json`) and workspace dependencies.
+  2. Fix the broken `sequenceDiagram` Mermaid block in `README.md` (unescaped semicolon inside `Note over Attendee` on line 171).
+  3. Add `harness/verify-mermaid.mjs` (`pnpm run lint:mermaid`) to validate all `mermaid` code blocks across all Markdown files in the repository, and wire it into `pnpm run lint`, `init.sh`, `harness/validate-harness.mjs`, `harness/victory-detector.mjs`, and `tests/integration/commitlint.test.ts`.
+- **Completed**:
+  - Registered `"mermaid-validator"` (`npx -y @rtuin/mcp-mermaid-validator@latest`) in `~/.gemini/config/mcp_config.json` and installed `@rtuin/mcp-mermaid-validator`, `mermaid`, and `jsdom` in `package.json`.
+  - Fixed `README.md` line 171 (`Note over Attendee`) where an unescaped `;` caused a `sequenceDiagram` parser error, and added the Mermaid Validator badge to `README.md`.
+  - Created `harness/verify-mermaid.mjs` and `harness/verify-mermaid.d.mts` to parse and validate all 15 Mermaid diagrams across 29 Markdown files using `mermaid.parse()` + JSDOM.
+  - Wired `node harness/verify-mermaid.mjs` into `package.json` (`lint:mermaid`, `lint`, `check`), `init.sh`, `harness/validate-harness.mjs`, `harness/victory-detector.mjs`, and added automated test coverage in `tests/integration/commitlint.test.ts`.
+- **Verification Evidence**:
+  - `pnpm run lint:mermaid`: `✅ Mermaid validation passed (15 diagram(s) across 29 Markdown file(s)).`
+  - `./init.sh` and `pnpm run verify`: 13/13 test suites (132 tests) passing.

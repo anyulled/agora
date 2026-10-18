@@ -43,6 +43,7 @@ const requiredSubsystemFiles = [
   'harness/validate-harness.mjs',
   'harness/verify-architecture.mjs',
   'harness/verify-duplication.mjs',
+  'harness/verify-mermaid.mjs',
   'harness/verify-commit-msg.mjs',
   'harness/victory-detector.mjs',
   'sops/jscpd-dry-refactoring.md',

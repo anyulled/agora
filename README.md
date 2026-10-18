@@ -36,6 +36,7 @@
 [![Conventional Commits: 1.0.0](https://img.shields.io/badge/Conventional%20Commits-1.0.0-%23FE5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![ESLint: Flat Config Strict](https://img.shields.io/badge/ESLint_9-Flat_Config_Strict-4B32C3?logo=eslint&logoColor=white)](./eslint.config.mjs)
 [![jscpd Duplication: 1.7% (<10% Gate)](https://img.shields.io/badge/jscpd_Duplication-1.7%25_(%3C10%25_Gate)-brightgreen)](./.jscpd.json)
+[![Mermaid Diagrams: Validated](https://img.shields.io/badge/Mermaid_Diagrams-MCP_%26_CLI_Validated-FF3670?logo=mermaid&logoColor=white)](./harness/verify-mermaid.mjs)
 [![Code Style: Biome](https://img.shields.io/badge/Checked_with-Biome-60a5fa?style=flat&logo=biome)](https://biomejs.dev/)
 [![Accessibility: WCAG 2.2 AA](https://img.shields.io/badge/Accessibility-WCAG_2.2_AA-005A9C?logo=w3c)](./docs/FRONTEND.md)
 [![Local Emulation: D1 + R2 + DO SQLite](https://img.shields.io/badge/Local_Emulation-D1_%2B_R2_%2B_DO_SQLite-F38020?logo=cloudflare)](./docs/DESIGN.md)
@@ -168,7 +169,7 @@ sequenceDiagram
 
     Presenter->>Worker: POST /sessions/:id/slide (slide-1 -> slide-3, skipping slide-2)
     Worker-->>Attendee: WSS slide.changed (currentSlideId="slide-3", revealed=["slide-1","slide-3"])
-    Note over Attendee: Follow mode tracks slide-3 (no slide body content leaked).<br/>Solo mode browses ["slide-1","slide-3"]; skipped "slide-2" stays locked (403).
+    Note over Attendee: Follow mode tracks slide-3 (no slide body content leaked) — Solo mode browses ["slide-1","slide-3"], while skipped "slide-2" stays locked (403).
     Attendee->>Worker: POST /sessions/:id/questions ("How does D1 sync work?" on slide-3)
     Attendee->>Worker: POST /sessions/:id/questions/:qId/upvote (Idempotent composite PK)
     Note over Presenter: Speaker reaches embedded Q&A slide (data-component="audience-qa") and clicks question

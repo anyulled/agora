@@ -67,6 +67,7 @@ const layer1Files = [
   'harness/evaluator-rubric.md',
   'harness/quality-document.md',
   'harness/verify-duplication.mjs',
+  'harness/verify-mermaid.mjs',
 ];
 
 let layer1Missing = 0;

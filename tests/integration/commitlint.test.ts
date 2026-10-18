@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { validateCommitMessage } from '../../harness/verify-commit-msg.mjs';
 import { evaluateDuplicationOutput } from '../../harness/verify-duplication.mjs';
+import { extractMermaidBlocks, validateMermaidDiagram } from '../../harness/verify-mermaid.mjs';
 
 describe('Commit Message Validation', () => {
   it('allows valid conventional commit messages', () => {
@@ -117,5 +118,34 @@ describe('Commit Message Validation', () => {
       'Please refactor duplicated code blocks using DRY extraction strategies',
     );
     expect(failResult.message).toContain('sops/jscpd-dry-refactoring.md');
+  });
+
+  it('extracts and validates Mermaid diagrams in Markdown and catches syntax errors', async () => {
+    const markdownWithMermaid = [
+      '# Sample Doc',
+      '```mermaid',
+      'sequenceDiagram',
+      '  Speaker->>Edge: Jump directly to slide-3',
+      '  Note over Attendee: Follow mode jumps to slide-3, Solo mode browses ["slide-1","slide-3"] (slide-2 stays locked).',
+      '```',
+    ].join('\n');
+
+    const blocks = extractMermaidBlocks(markdownWithMermaid);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.startLine).toBe(2);
+
+    const validCheck = await validateMermaidDiagram(blocks[0]?.code ?? '');
+    expect(validCheck.valid).toBe(true);
+    expect(validCheck.diagramType).toBe('sequence');
+
+    const invalidSequenceDiagram = [
+      'sequenceDiagram',
+      '  Speaker->>Edge: Jump directly to slide-3',
+      '  Note over Attendee: Follow mode jumps to slide-3; skipped "slide-2" stays locked (403).',
+    ].join('\n');
+
+    const invalidCheck = await validateMermaidDiagram(invalidSequenceDiagram);
+    expect(invalidCheck.valid).toBe(false);
+    expect(invalidCheck.error).toContain('Parse error');
   });
 });
