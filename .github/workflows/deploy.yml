@@ -1,0 +1,63 @@
+name: Agora CD (Cloudflare Deploy)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - preview
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-and-deploy:
+    name: Verify & Deploy Cloudflare Worker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Make init.sh executable
+        run: chmod +x ./init.sh
+
+      - name: Run Canonical Baseline Verification
+        run: ./init.sh
+
+      - name: Check Cloudflare Secret Configuration
+        id: check-secrets
+        run: |
+          if [ -n "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+            echo "Cloudflare API token detected. Proceeding with deployment."
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+            echo "Notice: CLOUDFLARE_API_TOKEN is not configured in repository secrets."
+            echo "Verification passed. Skipping deployment step gracefully."
+          fi
+
+      - name: Deploy Cloudflare Worker & Durable Objects
+        if: steps.check-secrets.outputs.has_token == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: 'apps/worker'
+          command: deploy

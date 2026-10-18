@@ -1,0 +1,27 @@
+name = 'agora-worker'
+main = '../../apps/worker/src/index.ts'
+compatibility_date = '2024-11-01'
+compatibility_flags = ['nodejs_compat']
+
+[vars]
+ENVIRONMENT = 'production'
+ADMIN_TOKEN = 'agora-admin-secret-token'
+
+[[d1_databases]]
+binding = 'DB'
+database_name = 'agora-d1'
+database_id = 'agora-d1-production'
+migrations_dir = 'migrations'
+
+[[r2_buckets]]
+binding = 'ASSETS_BUCKET'
+bucket_name = 'agora-assets'
+
+[durable_objects]
+bindings = [
+  { name = 'SESSION_COORDINATOR', class_name = 'SessionCoordinatorDO' }
+]
+
+[[migrations]]
+tag = 'v1'
+new_sqlite_classes = ['SessionCoordinatorDO', 'SessionDurableObject']

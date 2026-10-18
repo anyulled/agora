@@ -1,0 +1,526 @@
+import type {
+  AssetManifest,
+  AudienceQuestion,
+  NavigationSuggestion,
+  Presentation,
+  PresentationSession,
+  QuestionStatus,
+  Reaction,
+  ReactionCounts,
+  SlideMetadata,
+} from '@agora/contracts';
+
+export type QaViewMode = 'list' | 'detail';
+
+export interface QaSlideControllerState {
+  isQaSlideActive: boolean;
+  viewMode: QaViewMode;
+  selectedQuestionId: string | null;
+  selectedQuestion: AudienceQuestion | null;
+  referencedSlidePngUrl: string | null;
+  hasReferencedSlidePng: boolean;
+  sortBy: 'votes' | 'time';
+}
+
+export interface PresenterViewState {
+  sessionId: string;
+  presentationId: string;
+  presentationTitle: string;
+  sessionStatus: PresentationSession['status'];
+  currentSlide: SlideMetadata | null;
+  horizontalIndex: number;
+  verticalIndex: number;
+  canNavigateLeft: boolean;
+  canNavigateRight: boolean;
+  canNavigateUp: boolean;
+  canNavigateDown: boolean;
+  reactions: ReactionCounts;
+  questionCount: number;
+  connectedParticipants: number;
+  pdfDownloadUnlocked: boolean;
+  activeSuggestion: NavigationSuggestion | null;
+  qaState: QaSlideControllerState;
+  hasAdminControls: false;
+}
+
+export interface ProjectorViewState {
+  sessionId: string;
+  presentationTitle: string;
+  currentSlide: SlideMetadata | null;
+  isQaSlide: boolean;
+  qaQuestions: AudienceQuestion[];
+  isSuggestionVisibleOnProjection: false;
+  hasPresenterOnlyControls: false;
+}
+
+export class PresenterAppController {
+  private session: PresentationSession;
+  private presentation: Presentation;
+  private manifest: AssetManifest | null = null;
+
+  private currentHorizontalIndex = 0;
+  private currentVerticalIndex = 0;
+
+  // Real-time HUD data
+  private reactionsBySlide: Map<string, ReactionCounts> = new Map();
+  private questions: AudienceQuestion[] = [];
+  private activeSuggestion: NavigationSuggestion | null = null;
+
+  // Embedded Q&A state (SPEC-008)
+  private qaViewMode: QaViewMode = 'list';
+  private selectedQuestionId: string | null = null;
+  private qaSortBy: 'votes' | 'time' = 'votes';
+
+  constructor(
+    session: PresentationSession,
+    presentation: Presentation,
+    manifest?: AssetManifest | null,
+  ) {
+    this.session = { ...session, revealedSlideIds: [...session.revealedSlideIds] };
+    this.presentation = { ...presentation };
+    this.manifest = manifest ? { ...manifest } : null;
+
+    // Locate initial slide coordinates from session.currentSlideId
+    if (this.session.currentSlideId) {
+      const initialSlide = this.presentation.slides?.find(
+        (s) => s.id === this.session.currentSlideId,
+      );
+      if (initialSlide) {
+        this.currentHorizontalIndex = initialSlide.horizontalIndex;
+        this.currentVerticalIndex = initialSlide.verticalIndex;
+      }
+    } else if (this.presentation.slides && this.presentation.slides.length > 0) {
+      const firstSlide = this.presentation.slides[0];
+      if (firstSlide) {
+        this.currentHorizontalIndex = firstSlide.horizontalIndex;
+        this.currentVerticalIndex = firstSlide.verticalIndex;
+        this.session.currentSlideId = firstSlide.id;
+        if (!this.session.revealedSlideIds.includes(firstSlide.id)) {
+          this.session.revealedSlideIds.push(firstSlide.id);
+        }
+      }
+    }
+  }
+
+  getSession(): PresentationSession {
+    return { ...this.session, revealedSlideIds: [...this.session.revealedSlideIds] };
+  }
+
+  setAssetManifest(manifest: AssetManifest): void {
+    this.manifest = { ...manifest };
+  }
+
+  getCurrentSlide(): SlideMetadata | null {
+    if (!this.presentation.slides) return null;
+    return (
+      this.presentation.slides.find(
+        (s) =>
+          s.horizontalIndex === this.currentHorizontalIndex &&
+          s.verticalIndex === this.currentVerticalIndex,
+      ) ?? null
+    );
+  }
+
+  // Directional checks (SPEC-012, SPEC-023)
+  canNavigateLeft(): boolean {
+    if (!this.presentation.slides) return false;
+    return this.presentation.slides.some(
+      (s) => s.horizontalIndex === this.currentHorizontalIndex - 1 && s.verticalIndex === 0,
+    );
+  }
+
+  canNavigateRight(): boolean {
+    if (!this.presentation.slides) return false;
+    return this.presentation.slides.some(
+      (s) => s.horizontalIndex === this.currentHorizontalIndex + 1 && s.verticalIndex === 0,
+    );
+  }
+
+  canNavigateUp(): boolean {
+    if (!this.presentation.slides) return false;
+    return this.presentation.slides.some(
+      (s) =>
+        s.horizontalIndex === this.currentHorizontalIndex &&
+        s.verticalIndex === this.currentVerticalIndex - 1,
+    );
+  }
+
+  canNavigateDown(): boolean {
+    if (!this.presentation.slides) return false;
+    return this.presentation.slides.some(
+      (s) =>
+        s.horizontalIndex === this.currentHorizontalIndex &&
+        s.verticalIndex === this.currentVerticalIndex + 1,
+    );
+  }
+
+  private applySlideTransition(targetH: number, targetV: number): boolean {
+    if (!this.presentation.slides) return false;
+    const target = this.presentation.slides.find(
+      (s) => s.horizontalIndex === targetH && s.verticalIndex === targetV,
+    );
+    if (!target) return false;
+
+    this.currentHorizontalIndex = targetH;
+    this.currentVerticalIndex = targetV;
+    this.session.currentSlideId = target.id;
+
+    // Reveal slide if newly visited
+    if (!this.session.revealedSlideIds.includes(target.id)) {
+      this.session.revealedSlideIds.push(target.id);
+    }
+
+    // SPEC-016 & SPEC-022: Visiting ending slide unlocks PDF permanently without completing session
+    if (target.id === this.presentation.endingSlideId) {
+      this.session.pdfDownloadUnlocked = true;
+    }
+
+    // Reset Q&A detail view when navigating away
+    if (!target.isQaSlide) {
+      this.qaViewMode = 'list';
+      this.selectedQuestionId = null;
+    }
+
+    return true;
+  }
+
+  navigateRight(): boolean {
+    if (!this.canNavigateRight()) return false;
+    return this.applySlideTransition(this.currentHorizontalIndex + 1, 0);
+  }
+
+  navigateLeft(): boolean {
+    if (!this.canNavigateLeft()) return false;
+    return this.applySlideTransition(this.currentHorizontalIndex - 1, 0);
+  }
+
+  navigateDown(): boolean {
+    if (!this.canNavigateDown()) return false;
+    return this.applySlideTransition(this.currentHorizontalIndex, this.currentVerticalIndex + 1);
+  }
+
+  navigateUp(): boolean {
+    if (!this.canNavigateUp()) return false;
+    return this.applySlideTransition(this.currentHorizontalIndex, this.currentVerticalIndex - 1);
+  }
+
+  jumpToSlide(slideId: string): boolean {
+    const target = this.presentation.slides?.find((s) => s.id === slideId);
+    if (!target) return false;
+    return this.applySlideTransition(target.horizontalIndex, target.verticalIndex);
+  }
+
+  // Keyboard navigation handler (SPEC-012, SPEC-023)
+  handleKeyDown(keyOrEvent: string | { key: string }): boolean {
+    const key = typeof keyOrEvent === 'string' ? keyOrEvent : keyOrEvent.key;
+
+    // SPEC-008: Escape key returns from Q&A detail view to list view
+    if (key === 'Escape' && this.qaViewMode === 'detail') {
+      this.backToList();
+      return true;
+    }
+
+    switch (key) {
+      case 'ArrowRight':
+        return this.navigateRight();
+      case 'ArrowLeft':
+        return this.navigateLeft();
+      case 'ArrowDown':
+        return this.navigateDown();
+      case 'ArrowUp':
+        return this.navigateUp();
+      default:
+        return false;
+    }
+  }
+
+  // Real-time HUD updates (SPEC-009, SPEC-012)
+  updateParticipantCount(count: number): void {
+    this.session.connectedParticipants = Math.max(0, count);
+  }
+
+  receiveReaction(slideId: string, reaction: Reaction): void {
+    let counts = this.reactionsBySlide.get(slideId);
+    if (!counts) {
+      counts = { '👍': 0, '🤔': 0, '❤️': 0, '😴': 0 };
+      this.reactionsBySlide.set(slideId, counts);
+    }
+    counts[reaction] += 1;
+  }
+
+  getReactionsForCurrentSlide(): ReactionCounts {
+    const current = this.getCurrentSlide();
+    const defaults: ReactionCounts = { '👍': 0, '🤔': 0, '❤️': 0, '😴': 0 };
+    if (!current) return defaults;
+    const counts = this.reactionsBySlide.get(current.id);
+    return counts ? { ...counts } : defaults;
+  }
+
+  // Adaptive navigation (SPEC-011)
+  setNavigationSuggestion(suggestion: NavigationSuggestion | null): void {
+    this.activeSuggestion = suggestion ? { ...suggestion } : null;
+  }
+
+  getActiveSuggestion(): NavigationSuggestion | null {
+    return this.activeSuggestion ? { ...this.activeSuggestion } : null;
+  }
+
+  acceptNavigationSuggestion(): boolean {
+    if (!this.activeSuggestion) return false;
+    const { targetHorizontalIndex, targetVerticalIndex } = this.activeSuggestion;
+    const success = this.applySlideTransition(targetHorizontalIndex, targetVerticalIndex);
+    this.activeSuggestion = null;
+    return success;
+  }
+
+  dismissNavigationSuggestion(): void {
+    this.activeSuggestion = null;
+  }
+
+  // Embedded Q&A Slide Controller (SPEC-008)
+  syncQuestions(questions: AudienceQuestion[]): void {
+    this.questions = [...questions];
+  }
+
+  selectQuestion(questionId: string): boolean {
+    const question = this.questions.find((q) => q.id === questionId);
+    if (!question) return false;
+
+    // SPEC-008 Invariant: Transitions to internal detail view WITHOUT navigating Reveal.js
+    this.qaViewMode = 'detail';
+    this.selectedQuestionId = questionId;
+    return true;
+  }
+
+  backToList(): void {
+    this.qaViewMode = 'list';
+    this.selectedQuestionId = null;
+  }
+
+  setQaSortBy(sortBy: 'votes' | 'time'): void {
+    this.qaSortBy = sortBy;
+  }
+
+  markQuestionStatus(questionId: string, status: QuestionStatus): void {
+    const question = this.questions.find((q) => q.id === questionId);
+    if (question) {
+      question.status = status;
+    }
+  }
+
+  getQaState(): QaSlideControllerState {
+    const currentSlide = this.getCurrentSlide();
+    const isQa = Boolean(currentSlide?.isQaSlide);
+    const selected = this.selectedQuestionId
+      ? (this.questions.find((q) => q.id === this.selectedQuestionId) ?? null)
+      : null;
+
+    let pngUrl: string | null = null;
+    let hasPng = false;
+
+    if (selected && this.manifest?.slidePngs[selected.slideId]) {
+      const entry = this.manifest.slidePngs[selected.slideId];
+      if (entry) {
+        pngUrl = `/assets/${entry.r2Key}`;
+        hasPng = true;
+      }
+    }
+
+    return {
+      isQaSlideActive: isQa,
+      viewMode: this.qaViewMode,
+      selectedQuestionId: this.selectedQuestionId,
+      selectedQuestion: selected,
+      referencedSlidePngUrl: pngUrl,
+      hasReferencedSlidePng: hasPng,
+      sortBy: this.qaSortBy,
+    };
+  }
+
+  getQuestions(sortBy = this.qaSortBy): AudienceQuestion[] {
+    const copy = [...this.questions];
+    if (sortBy === 'votes') {
+      return copy.sort((a, b) => b.upvotes - a.upvotes);
+    }
+    return copy.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  // SPEC-002, SPEC-022: Explicit session completion
+  completeSession(): PresentationSession {
+    this.session.status = 'completed';
+    this.session.completedAt = new Date().toISOString();
+    return this.getSession();
+  }
+
+  getViewState(): PresenterViewState {
+    const currentSlide = this.getCurrentSlide();
+    return {
+      sessionId: this.session.id,
+      presentationId: this.presentation.id,
+      presentationTitle: this.presentation.title,
+      sessionStatus: this.session.status,
+      currentSlide,
+      horizontalIndex: this.currentHorizontalIndex,
+      verticalIndex: this.currentVerticalIndex,
+      canNavigateLeft: this.canNavigateLeft(),
+      canNavigateRight: this.canNavigateRight(),
+      canNavigateUp: this.canNavigateUp(),
+      canNavigateDown: this.canNavigateDown(),
+      reactions: this.getReactionsForCurrentSlide(),
+      questionCount: this.questions.length,
+      connectedParticipants: this.session.connectedParticipants ?? 0,
+      pdfDownloadUnlocked: this.session.pdfDownloadUnlocked,
+      activeSuggestion: this.getActiveSuggestion(),
+      qaState: this.getQaState(),
+      hasAdminControls: false, // SPEC-012: Invariant
+    };
+  }
+
+  getProjectorViewState(): ProjectorViewState {
+    const currentSlide = this.getCurrentSlide();
+    return {
+      sessionId: this.session.id,
+      presentationTitle: this.presentation.title,
+      currentSlide,
+      isQaSlide: Boolean(currentSlide?.isQaSlide),
+      qaQuestions: this.getQuestions(),
+      isSuggestionVisibleOnProjection: false, // SPEC-012: Invariant
+      hasPresenterOnlyControls: false, // SPEC-012: Invariant
+    };
+  }
+}
+
+// Clean view-model renderers
+export function renderPresenterViewHtml(state: PresenterViewState): string {
+  // Adaptive navigation suggestion banner (SPEC-011)
+  let suggestionBanner = '';
+  if (state.activeSuggestion) {
+    suggestionBanner = `
+      <aside class="suggestion-banner" role="alert" aria-live="assertive">
+        <div class="suggestion-content">
+          <strong>Suggested Navigation:</strong> ${state.activeSuggestion.reason}
+          <span>(Target coordinates: ${state.activeSuggestion.targetHorizontalIndex}, ${state.activeSuggestion.targetVerticalIndex})</span>
+        </div>
+        <div class="suggestion-actions">
+          <button class="btn-confirm" data-action="accept-suggestion">Accept & Jump</button>
+          <button class="btn-dismiss" data-action="dismiss-suggestion">Dismiss</button>
+        </div>
+      </aside>`;
+  }
+
+  // Embedded Q&A detail or list overlay (SPEC-008)
+  let qaViewHtml = '';
+  if (state.qaState.isQaSlideActive) {
+    if (state.qaState.viewMode === 'detail' && state.qaState.selectedQuestion) {
+      const q = state.qaState.selectedQuestion;
+      const slideImageBlock = state.qaState.hasReferencedSlidePng
+        ? `<div class="referenced-slide-preview">
+             <img src="${state.qaState.referencedSlidePngUrl}" alt="Referenced Slide ${q.slideId}" class="slide-static-img" />
+           </div>`
+        : `<div class="referenced-slide-fallback">
+             <p>Static slide preview image unavailable for this slide.</p>
+           </div>`;
+
+      qaViewHtml = `
+        <div class="qa-detail-view" role="region" aria-label="Question detail view">
+          <div class="qa-detail-header">
+            <button class="btn-back" data-action="qa-back">&larr; Back to List (Esc)</button>
+            <div class="qa-status-controls">
+              <button class="btn-status" data-action="qa-mark-answered" data-id="${q.id}">Mark Answered</button>
+              <button class="btn-status" data-action="qa-mark-dismissed" data-id="${q.id}">Dismiss</button>
+            </div>
+          </div>
+          <article class="question-featured">
+            <h3>"${q.content}"</h3>
+            <p class="question-meta">Submitted by ${q.participantName ?? 'Anonymous'} &bull; ${q.upvotes} upvotes</p>
+          </article>
+          ${slideImageBlock}
+        </div>`;
+    } else {
+      qaViewHtml = `
+        <div class="qa-list-view" role="region" aria-label="Question list view">
+          <h3>Audience Questions</h3>
+          <p class="qa-hint">Click a question to view referenced slide image</p>
+        </div>`;
+    }
+  }
+
+  return `
+    <div class="presenter-console">
+      ${suggestionBanner}
+      <div class="console-body">
+        <section class="slide-viewport" aria-label="Active Slide Viewport">
+          <h2 class="slide-title-display">${state.currentSlide?.title ?? 'No slide'}</h2>
+          <span class="coordinates-indicator">Coordinates: [${state.horizontalIndex}, ${state.verticalIndex}]</span>
+          ${qaViewHtml}
+        </section>
+        <aside class="presenter-sidebar">
+          <div class="metrics-hud">
+            <div class="metric-item">
+              <span class="metric-label">Attendees</span>
+              <strong class="metric-value">${state.connectedParticipants}</strong>
+            </div>
+            <div class="metric-item">
+              <span class="metric-label">Questions</span>
+              <strong class="metric-value">${state.questionCount}</strong>
+            </div>
+            <div class="reactions-hud">
+              <span>👍 ${state.reactions['👍']}</span>
+              <span>🤔 ${state.reactions['🤔']}</span>
+              <span>❤️ ${state.reactions['❤️']}</span>
+              <span>😴 ${state.reactions['😴']}</span>
+            </div>
+          </div>
+          <nav class="dpad-container" aria-label="Slide directional navigation">
+            <div></div>
+            <button class="dpad-btn" data-action="nav-up" ${!state.canNavigateUp ? 'disabled' : ''} aria-label="Up">&uarr;</button>
+            <div></div>
+            <button class="dpad-btn" data-action="nav-left" ${!state.canNavigateLeft ? 'disabled' : ''} aria-label="Left">&larr;</button>
+            <div></div>
+            <button class="dpad-btn" data-action="nav-right" ${!state.canNavigateRight ? 'disabled' : ''} aria-label="Right">&rarr;</button>
+            <div></div>
+            <button class="dpad-btn" data-action="nav-down" ${!state.canNavigateDown ? 'disabled' : ''} aria-label="Down">&darr;</button>
+            <div></div>
+          </nav>
+          <div class="session-management">
+            <span class="pdf-status">PDF Unlock: ${state.pdfDownloadUnlocked ? 'Unlocked' : 'Locked'}</span>
+            <button class="btn-complete-session" data-action="complete-session">Complete Session</button>
+          </div>
+        </aside>
+      </div>
+    </div>`;
+}
+
+export function renderProjectorViewHtml(state: ProjectorViewState): string {
+  // Public projection strictly contains no presenter controls or suggestion banners (SPEC-012)
+  let content = '';
+  if (state.isQaSlide) {
+    const listHtml = state.qaQuestions
+      .map(
+        (q) => `
+        <li class="projector-question-item">
+          <span class="q-votes">▲ ${q.upvotes}</span>
+          <span class="q-text">${q.content}</span>
+        </li>`,
+      )
+      .join('');
+
+    content = `
+      <div class="projector-qa-slide" data-component="audience-qa">
+        <h2>Live Audience Q&A</h2>
+        <ul class="projector-questions-list">
+          ${listHtml || '<li>No questions submitted yet.</li>'}
+        </ul>
+      </div>`;
+  } else {
+    content = `
+      <div class="projector-slide-content">
+        <h1>${state.currentSlide?.title ?? state.presentationTitle}</h1>
+      </div>`;
+  }
+
+  return `
+    <div class="projector-display">
+      ${content}
+    </div>`;
+}

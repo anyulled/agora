@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agora Presenter Console</title>
+    <style>
+      :root {
+        --color-bg: #090d16;
+        --color-surface: #131b2e;
+        --color-border: #23314d;
+        --color-text: #f8fafc;
+        --color-muted: #94a3b8;
+        --color-primary: #3b82f6;
+        --color-accent: #10b981;
+        --color-warning: #f59e0b;
+        --color-danger: #ef4444;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: var(--color-bg);
+        color: var(--color-text);
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        background-color: var(--color-surface);
+        border-bottom: 1px solid var(--color-border);
+        padding: 0.75rem 1.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      main {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 1fr 340px;
+        height: calc(100vh - 65px);
+      }
+      .slide-viewport {
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #000;
+        position: relative;
+      }
+      .presenter-sidebar {
+        background: var(--color-surface);
+        border-left: 1px solid var(--color-border);
+        padding: 1.25rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+        overflow-y: auto;
+      }
+      .dpad-container {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        grid-gap: 8px;
+        width: 180px;
+        margin: 0 auto;
+      }
+      .dpad-btn {
+        height: 50px;
+        background: #1e293b;
+        color: white;
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        font-size: 1.25rem;
+        cursor: pointer;
+      }
+      .dpad-btn:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="presenter-root"></div>
+    <script type="module" src="./src/index.ts"></script>
+  </body>
+</html>

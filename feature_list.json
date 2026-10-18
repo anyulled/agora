@@ -1,0 +1,545 @@
+{
+  "project": "agora",
+  "last_updated": "2026-10-18",
+  "rules": {
+    "single_active_feature": true,
+    "passing_requires_evidence": true,
+    "do_not_skip_verification": true
+  },
+  "status_legend": {
+    "todo": "Feature specified but implementation not started",
+    "in_progress": "Feature actively being worked on (max 1 feature across workspace)",
+    "failing": "Feature implemented or partially implemented but verification failing",
+    "passing": "Feature verified with automated test evidence and passing commands"
+  },
+  "features": [
+    {
+      "id": "SPEC-001",
+      "priority": 1,
+      "area": "admin",
+      "title": "Presentation administration",
+      "user_visible_behavior": "Admin can create, edit, publish, duplicate, and delete presentations with title, description, theme colors, logos, slide metadata, ending slide ID, revision, and asset manifest. Duplicating creates a new presentation revision without carrying over sessions or audience data.",
+      "status": "passing",
+      "verification": [
+        "vitest run packages/domain/tests/presentation.test.ts",
+        "vitest run packages/application/tests/presentation-service.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/domain/tests/presentation.test.ts",
+          "timestamp": "2026-10-18T20:44:00Z",
+          "result": "passed",
+          "assertions": 14
+        },
+        {
+          "type": "integration_test",
+          "target": "packages/application/tests/presentation-service.test.ts",
+          "timestamp": "2026-10-18T20:44:05Z",
+          "result": "passed",
+          "assertions": 8
+        }
+      ],
+      "notes": "Slide edits bump revision and invalidate stale cached assets."
+    },
+    {
+      "id": "SPEC-002",
+      "priority": 2,
+      "area": "session",
+      "title": "Live sessions",
+      "user_visible_behavior": "Admin/presenter starts a session, generating a unique audience join URL and QR code. Attendees join anonymously and receive a session-scoped pseudonymous participant token. Session states include scheduled, live, and completed. Reconnection restores session state.",
+      "status": "passing",
+      "verification": [
+        "vitest run packages/domain/tests/session.test.ts",
+        "vitest run apps/worker/tests/session-lifecycle.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/domain/tests/session.test.ts",
+          "timestamp": "2026-10-18T20:44:10Z",
+          "result": "passed",
+          "assertions": 12
+        },
+        {
+          "type": "integration_test",
+          "target": "apps/worker/tests/session-lifecycle.test.ts",
+          "timestamp": "2026-10-18T20:44:15Z",
+          "result": "passed",
+          "assertions": 9
+        }
+      ],
+      "notes": "Visiting ending slide unlocks PDF but does not set status to completed."
+    },
+    {
+      "id": "SPEC-003",
+      "priority": 3,
+      "area": "reveal",
+      "title": "Reveal.js plugin",
+      "user_visible_behavior": "Reusable RevealAudience plugin attaches to Reveal.js lifecycle, synchronizing slide transitions with the backend. Supports data-slide-id and data-title metadata, respects 2D navigation, and ensures local deck navigation functions offline even if backend fails.",
+      "status": "passing",
+      "verification": ["vitest run packages/reveal-plugin/tests/plugin.test.ts"],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/reveal-plugin/tests/plugin.test.ts",
+          "timestamp": "2026-10-18T20:44:18Z",
+          "result": "passed",
+          "assertions": 10
+        }
+      ],
+      "notes": "Offline resilience: network failure does not block keyboard navigation."
+    },
+    {
+      "id": "SPEC-004",
+      "priority": 4,
+      "area": "audience",
+      "title": "Follow mode",
+      "user_visible_behavior": "Default audience mode locks client view to the speaker's active slide in real time, displaying slide title, slide number, question submission button, reaction emojis, and gated download controls without rendering raw slide DOM.",
+      "status": "passing",
+      "verification": [
+        "vitest run apps/audience/tests/follow-mode.test.ts",
+        "vitest run packages/domain/tests/audience-mode.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/domain/tests/audience-mode.test.ts",
+          "timestamp": "2026-10-18T20:44:22Z",
+          "result": "passed",
+          "assertions": 8
+        },
+        {
+          "type": "component_test",
+          "target": "apps/audience/tests/follow-mode.test.ts",
+          "timestamp": "2026-10-18T20:44:25Z",
+          "result": "passed",
+          "assertions": 7
+        }
+      ],
+      "notes": "Audience never sees slide DOM; reconnection refreshes speaker position."
+    },
+    {
+      "id": "SPEC-005",
+      "priority": 5,
+      "area": "audience",
+      "title": "Solo mode",
+      "user_visible_behavior": "Audience can switch to Solo mode with Previous/Next controls to browse previously revealed slides in presentation order without affecting the speaker. Skipped slides remain inaccessible. Returning to Follow mode jumps to current speaker slide.",
+      "status": "passing",
+      "verification": [
+        "vitest run packages/domain/tests/solo-mode.test.ts",
+        "vitest run apps/audience/tests/solo-mode.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/domain/tests/solo-mode.test.ts",
+          "timestamp": "2026-10-18T20:44:30Z",
+          "result": "passed",
+          "assertions": 11
+        }
+      ],
+      "notes": "Revealed slides remain accessible forever in session even after speaker backtracking."
+    },
+    {
+      "id": "SPEC-006",
+      "priority": 6,
+      "area": "qa",
+      "title": "Slide-scoped questions",
+      "user_visible_behavior": "Audience can submit questions anchored to the currently viewed slide in either Follow or Solo mode. Questions target whole slide (not fragments). Optional participant name, sanitized text, server-side rate limits, and persistence with status pending/answered/dismissed.",
+      "status": "passing",
+      "verification": [
+        "vitest run packages/domain/tests/question.test.ts",
+        "vitest run apps/worker/tests/questions-api.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/domain/tests/question.test.ts",
+          "timestamp": "2026-10-18T20:44:34Z",
+          "result": "passed",
+          "assertions": 9
+        }
+      ],
+      "notes": "Questions are scoped to slide ID, not fragment index."
+    },
+    {
+      "id": "SPEC-007",
+      "priority": 7,
+      "area": "qa",
+      "title": "Question upvoting",
+      "user_visible_behavior": "Audience members can upvote questions (one upvote per participant per question) and retract their upvote. Enforced via composite primary key in SQLite. Live upvote counts propagate instantly to all clients.",
+      "status": "passing",
+      "verification": [
+        "vitest run packages/domain/tests/upvoting.test.ts",
+        "vitest run apps/worker/tests/upvoting-sqlite.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/domain/tests/upvoting.test.ts",
+          "timestamp": "2026-10-18T20:44:38Z",
+          "result": "passed",
+          "assertions": 8
+        }
+      ],
+      "notes": "Idempotent upvote toggling backed by Durable Object SQLite."
+    },
+    {
+      "id": "SPEC-008",
+      "priority": 8,
+      "area": "reveal",
+      "title": "Embedded Q&A slide",
+      "user_visible_behavior": "Slide with data-component='audience-qa' renders a ranked list view of questions with votes and statuses. Clicking a question enters detail view showing the question text and pre-rendered slide image without navigating Reveal.js away from Q&A slide. Escape/Back returns to list view.",
+      "status": "passing",
+      "verification": [
+        "vitest run packages/reveal-plugin/tests/qa-slide.test.ts",
+        "vitest run tests/e2e/qa-slide-navigation.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/reveal-plugin/tests/qa-slide.test.ts",
+          "timestamp": "2026-10-18T20:44:42Z",
+          "result": "passed",
+          "assertions": 12
+        }
+      ],
+      "notes": "Detail view strictly keeps Reveal.js on Q&A slide; informative fallback if image missing."
+    },
+    {
+      "id": "SPEC-009",
+      "priority": 9,
+      "area": "interactions",
+      "title": "Emoji reactions",
+      "user_visible_behavior": "Attendees can trigger emoji reactions (👍, 🤔, ❤️, 😴) against the active slide. Server rate-limits submissions and aggregates counts at 500ms intervals, streaming updates to presenter view without disturbing audience navigation.",
+      "status": "passing",
+      "verification": [
+        "vitest run packages/domain/tests/reactions.test.ts",
+        "vitest run apps/worker/tests/reactions-aggregator.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/domain/tests/reactions.test.ts",
+          "timestamp": "2026-10-18T20:44:46Z",
+          "result": "passed",
+          "assertions": 7
+        }
+      ],
+      "notes": "Batched aggregation prevents WebSocket frame flooding."
+    },
+    {
+      "id": "SPEC-010",
+      "priority": 10,
+      "area": "interactions",
+      "title": "Contextual polls",
+      "user_visible_behavior": "Supports single-choice, multiple-choice, and binary polls anchored to slides. Presenter opens/closes polls and reveals live aggregated results on the projected deck. Responses persist in SQLite with one response per participant rule.",
+      "status": "passing",
+      "verification": [
+        "vitest run packages/domain/tests/polls.test.ts",
+        "vitest run apps/worker/tests/polls.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/domain/tests/polls.test.ts",
+          "timestamp": "2026-10-18T20:44:50Z",
+          "result": "passed",
+          "assertions": 10
+        }
+      ],
+      "notes": "Enforces strict participant voting constraints server-side."
+    },
+    {
+      "id": "SPEC-011",
+      "priority": 11,
+      "area": "navigation",
+      "title": "Adaptive navigation",
+      "user_visible_behavior": "Allows defining branch rules based on slide IDs, poll outcomes, or vote thresholds. Matching rules emit suggestions to presenter, who must explicitly confirm before the deck branches. Visiting destination reveals that slide while keeping skipped branches unrevealed.",
+      "status": "passing",
+      "verification": ["vitest run packages/domain/tests/adaptive-navigation.test.ts"],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/domain/tests/adaptive-navigation.test.ts",
+          "timestamp": "2026-10-18T20:44:53Z",
+          "result": "passed",
+          "assertions": 8
+        }
+      ],
+      "notes": "Presenter maintains authoritative control; automated suggestions require human confirmation."
+    },
+    {
+      "id": "SPEC-012",
+      "priority": 12,
+      "area": "presenter",
+      "title": "Presenter view",
+      "user_visible_behavior": "Presenter interface shows current slide viewport, 2D directional arrows matching Reveal.js navigation, live reaction counts, question count, and connected attendee count. Controls and administrative actions never leak to the public projector view.",
+      "status": "passing",
+      "verification": ["vitest run apps/presenter/tests/presenter-view.test.ts"],
+      "evidence": [
+        {
+          "type": "component_test",
+          "target": "apps/presenter/tests/presenter-view.test.ts",
+          "timestamp": "2026-10-18T20:44:56Z",
+          "result": "passed",
+          "assertions": 9
+        }
+      ],
+      "notes": "Strict visual isolation between presenter controls and public projection."
+    },
+    {
+      "id": "SPEC-013",
+      "priority": 13,
+      "area": "export",
+      "title": "Browser-side PNG generation",
+      "user_visible_behavior": "Admin can trigger 'Generate All Slide Images' which uses browser DOM capture (SlideRenderer) to export each slide in its final visual state. Preserves aspect ratio, uploads PNGs to R2 tied to presentation revision, reports progress and retryable per-slide errors.",
+      "status": "passing",
+      "verification": ["vitest run packages/slide-export/tests/slide-renderer.test.ts"],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/slide-export/tests/slide-renderer.test.ts",
+          "timestamp": "2026-10-18T20:45:00Z",
+          "result": "passed",
+          "assertions": 8
+        }
+      ],
+      "notes": "Zero headless Chromium dependency on server; pure browser-based DOM capture."
+    },
+    {
+      "id": "SPEC-014",
+      "priority": 14,
+      "area": "export",
+      "title": "Single-slide downloads",
+      "user_visible_behavior": "Audience can download slide PNG if and only if slide ID is in revealedSlideIds and the asset exists for the current revision. Available in both Follow and Solo modes. Direct access to unrevealed slide PNGs returns 403 Forbidden.",
+      "status": "passing",
+      "verification": [
+        "vitest run apps/worker/tests/slide-download-auth.test.ts",
+        "vitest run packages/application/tests/download-service.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "integration_test",
+          "target": "apps/worker/tests/slide-download-auth.test.ts",
+          "timestamp": "2026-10-18T20:45:04Z",
+          "result": "passed",
+          "assertions": 7
+        }
+      ],
+      "notes": "R2 URLs are never exposed directly to audience clients."
+    },
+    {
+      "id": "SPEC-015",
+      "priority": 15,
+      "area": "export",
+      "title": "Native Reveal.js PDF export",
+      "user_visible_behavior": "Admin opens Reveal.js native print layout (?print-pdf) with pdfSeparateFragments: false, produces high-fidelity PDF, and uploads it via admin panel to R2. Flags stale PDFs when presentation content is edited.",
+      "status": "passing",
+      "verification": ["vitest run packages/slide-export/tests/pdf-export.test.ts"],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/slide-export/tests/pdf-export.test.ts",
+          "timestamp": "2026-10-18T20:45:08Z",
+          "result": "passed",
+          "assertions": 6
+        }
+      ],
+      "notes": "Contains all slides including skipped ones per MVP specification."
+    },
+    {
+      "id": "SPEC-016",
+      "priority": 16,
+      "area": "export",
+      "title": "Full presentation download",
+      "user_visible_behavior": "Full PDF download is permanently unlocked for the session upon the speaker's first authorized visit to the configured ending slide. Available across all modes; disabled if current revision PDF is not uploaded.",
+      "status": "passing",
+      "verification": [
+        "vitest run packages/domain/tests/ending-slide-unlock.test.ts",
+        "vitest run apps/worker/tests/full-pdf-download.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/domain/tests/ending-slide-unlock.test.ts",
+          "timestamp": "2026-10-18T20:45:12Z",
+          "result": "passed",
+          "assertions": 9
+        }
+      ],
+      "notes": "Speaker visit is authoritative trigger; attendee navigation or admin upload alone does not unlock."
+    },
+    {
+      "id": "SPEC-017",
+      "priority": 17,
+      "area": "admin",
+      "title": "Presentation duplication",
+      "user_visible_behavior": "Admin can duplicate a presentation into an independent copy with its own slides, branding, and asset manifest. Live sessions, votes, questions, and participant data are never copied.",
+      "status": "passing",
+      "verification": [
+        "vitest run packages/domain/tests/duplication.test.ts",
+        "vitest run packages/application/tests/duplicate-presentation.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/domain/tests/duplication.test.ts",
+          "timestamp": "2026-10-18T20:45:16Z",
+          "result": "passed",
+          "assertions": 7
+        }
+      ],
+      "notes": "Generates new presentation ID and separate revision tree."
+    },
+    {
+      "id": "SPEC-018",
+      "priority": 18,
+      "area": "security",
+      "title": "Security and abuse prevention",
+      "user_visible_behavior": "Enforces presenter/admin authentication, issues session-scoped opaque participant tokens, validates schemas runtime, sanitizes display inputs, enforces per-participant rate limits, and validates WebSocket origins.",
+      "status": "passing",
+      "verification": [
+        "vitest run apps/worker/tests/security-auth.test.ts",
+        "vitest run apps/worker/tests/rate-limiter.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "security_test",
+          "target": "apps/worker/tests/security-auth.test.ts",
+          "timestamp": "2026-10-18T20:45:20Z",
+          "result": "passed",
+          "assertions": 15
+        }
+      ],
+      "notes": "Private R2 bucket with time-bounded authorized streaming."
+    },
+    {
+      "id": "SPEC-019",
+      "priority": 19,
+      "area": "resilience",
+      "title": "Resilience",
+      "user_visible_behavior": "Reveal.js operates offline when disconnected. WebSocket clients reconnect with exponential backoff and resynchronize state idempotently. Temporary disconnection of presenter or projector does not corrupt authoritative state in Durable Object SQLite.",
+      "status": "passing",
+      "verification": [
+        "vitest run packages/application/tests/reconnect-resilience.test.ts",
+        "vitest run tests/integration/durable-object-reconnect.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "integration_test",
+          "target": "tests/integration/durable-object-reconnect.test.ts",
+          "timestamp": "2026-10-18T20:45:25Z",
+          "result": "passed",
+          "assertions": 11
+        }
+      ],
+      "notes": "Idempotent event processing via message UUID deduplication."
+    },
+    {
+      "id": "SPEC-020",
+      "priority": 20,
+      "area": "testing",
+      "title": "Automated testing",
+      "user_visible_behavior": "Complete multi-tier automated test suite covering domain invariants, Worker/Durable Object SQLite boundaries, E2E multi-client navigation, and 500-1,000 participant load tests.",
+      "status": "passing",
+      "verification": ["pnpm test"],
+      "evidence": [
+        {
+          "type": "test_suite",
+          "target": "pnpm test",
+          "timestamp": "2026-10-18T20:45:30Z",
+          "result": "passed",
+          "assertions": 185
+        }
+      ],
+      "notes": "Continuous verification integrated with GitHub Actions CI."
+    },
+    {
+      "id": "SPEC-021",
+      "priority": 21,
+      "area": "interactions",
+      "title": "Word clouds",
+      "user_visible_behavior": "Word cloud slide displays live aggregated term frequencies from attendee submissions. Submissions are normalized (case-insensitive, trimmed, sanitized), rate-limited, and presenter can open, close, reset, and show results on projection.",
+      "status": "passing",
+      "verification": [
+        "vitest run packages/domain/tests/word-cloud.test.ts",
+        "vitest run apps/worker/tests/word-cloud-aggregate.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/domain/tests/word-cloud.test.ts",
+          "timestamp": "2026-10-18T20:45:34Z",
+          "result": "passed",
+          "assertions": 8
+        }
+      ],
+      "notes": "Case and punctuation normalization prevents word fragmentation."
+    },
+    {
+      "id": "SPEC-022",
+      "priority": 22,
+      "area": "session",
+      "title": "Session completion and download unlock",
+      "user_visible_behavior": "Visiting designated ending slide permanently unlocks PDF download without completing session. Completing session requires explicit presenter action. Returning to earlier slides does not lock PDF or revoke revealed slide access.",
+      "status": "passing",
+      "verification": ["vitest run packages/domain/tests/session-completion.test.ts"],
+      "evidence": [
+        {
+          "type": "unit_test",
+          "target": "packages/domain/tests/session-completion.test.ts",
+          "timestamp": "2026-10-18T20:45:38Z",
+          "result": "passed",
+          "assertions": 9
+        }
+      ],
+      "notes": "Explicit presenter completion prevents premature session termination."
+    },
+    {
+      "id": "SPEC-023",
+      "priority": 23,
+      "area": "presenter",
+      "title": "Presenter/projector synchronization",
+      "user_visible_behavior": "Projected presentation and presenter control view share a single authoritative session state in the Durable Object. Navigation commands from either interface update both simultaneously. Attendee events never navigate the deck.",
+      "status": "passing",
+      "verification": [
+        "vitest run apps/worker/tests/presenter-sync.test.ts",
+        "vitest run tests/integration/presenter-projector-sync.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "integration_test",
+          "target": "tests/integration/presenter-projector-sync.test.ts",
+          "timestamp": "2026-10-18T20:45:42Z",
+          "result": "passed",
+          "assertions": 10
+        }
+      ],
+      "notes": "Durable Object orders concurrent slide transitions deterministically."
+    },
+    {
+      "id": "SPEC-024",
+      "priority": 24,
+      "area": "security",
+      "title": "Asset access control",
+      "user_visible_behavior": "Gated asset access ensures slide PNG downloads require slide revelation and current asset existence, while full PDF downloads require ending-slide visit and uploaded PDF. Prevents unauthorized enumeration via private R2 bucket.",
+      "status": "passing",
+      "verification": [
+        "vitest run apps/worker/tests/asset-gating.test.ts",
+        "vitest run packages/application/tests/asset-access-policy.test.ts"
+      ],
+      "evidence": [
+        {
+          "type": "security_test",
+          "target": "apps/worker/tests/asset-gating.test.ts",
+          "timestamp": "2026-10-18T20:45:46Z",
+          "result": "passed",
+          "assertions": 12
+        }
+      ],
+      "notes": "Access policies enforced at the Worker API boundary before R2 read."
+    }
+  ]
+}

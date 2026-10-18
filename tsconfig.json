@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "@agora/contracts": ["./packages/contracts/src/index.ts"],
+      "@agora/domain": ["./packages/domain/src/index.ts"],
+      "@agora/application": ["./packages/application/src/index.ts"],
+      "@agora/reveal-plugin": ["./packages/reveal-plugin/src/index.ts"],
+      "@agora/slide-export": ["./packages/slide-export/src/index.ts"]
+    }
+  },
+  "include": [
+    "packages/*/src/**/*.ts",
+    "apps/*/src/**/*.ts",
+    "apps/*/src/**/*.tsx",
+    "tests/**/*.ts"
+  ]
+}

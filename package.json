@@ -1,0 +1,33 @@
+{
+  "name": "agora",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agora — Interactive Conference Presentation Platform",
+  "type": "module",
+  "packageManager": "pnpm@11.5.2",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm --parallel -r dev",
+    "typecheck": "tsc --build tsconfig.json",
+    "lint": "biome lint . && node harness/verify-architecture.mjs && node harness/validate-harness.mjs",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "check": "biome check . && node harness/verify-architecture.mjs && node harness/validate-harness.mjs",
+    "test": "vitest run",
+    "test:unit": "vitest run packages/ apps/",
+    "test:integration": "vitest run tests/integration/",
+    "test:perf": "vitest run tests/performance/",
+    "test:e2e": "vitest run tests/e2e/",
+    "verify": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && node harness/victory-detector.mjs",
+    "harness:validate": "node harness/validate-harness.mjs",
+    "harness:arch": "node harness/verify-architecture.mjs",
+    "harness:victory": "node harness/victory-detector.mjs",
+    "harness:graph": "node harness/maker-checker-graph.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
+}
