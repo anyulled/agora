@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { validateCommitMessage } from '../../harness/verify-commit-msg.mjs';
+import { evaluateDuplicationOutput } from '../../harness/verify-duplication.mjs';
 
 describe('Commit Message Validation', () => {
   it('allows valid conventional commit messages', () => {
@@ -75,5 +76,46 @@ describe('Commit Message Validation', () => {
     expect(eslintContent).toContain('no-restricted-imports');
     expect(eslintContent).toContain('packages/domain/**/*.ts');
     expect(eslintContent).toContain('packages/application/**/*.ts');
+  });
+
+  it('enforces jscpd duplication threshold <= 10% and provides a clear DRY refactoring message when exceeded', () => {
+    const passingSample = [
+      'Clones:',
+      'worker/src/index.ts 580-585 ~ 668-673',
+      '---',
+      '13 clones · 1.7% duplication',
+      '---',
+      'Summary by tokens (17 files, 11 folders):',
+      'files (tokens/lines/size/cx/dup%):',
+      'worker/src/index.ts 8206/1277/43.8K/287/8.7%',
+    ].join('\n');
+
+    const passResult = evaluateDuplicationOutput(passingSample, 10);
+    expect(passResult.valid).toBe(true);
+    expect(passResult.totalDuplicationPercent).toBe(1.7);
+    expect(passResult.violatingFiles).toHaveLength(0);
+
+    const failingSample = [
+      'Clones:',
+      'worker/src/index.ts 542-560 ~ 660-678',
+      '---',
+      '18 clones · 11.4% duplication',
+      '---',
+      'Summary by tokens (17 files, 11 folders):',
+      'files (tokens/lines/size/cx/dup%):',
+      'worker/src/index.ts 8364/1297/44.5K/292/12.5%',
+    ].join('\n');
+
+    const failResult = evaluateDuplicationOutput(failingSample, 10);
+    expect(failResult.valid).toBe(false);
+    expect(failResult.totalDuplicationPercent).toBe(11.4);
+    expect(failResult.violatingFiles).toEqual([
+      { file: 'worker/src/index.ts', duplicationPercent: 12.5 },
+    ]);
+    expect(failResult.message).toContain('Code Duplication Threshold Exceeded (> 10%)');
+    expect(failResult.message).toContain(
+      'Please refactor duplicated code blocks using DRY extraction strategies',
+    );
+    expect(failResult.message).toContain('sops/jscpd-dry-refactoring.md');
   });
 });

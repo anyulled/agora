@@ -38,11 +38,14 @@ const requiredSubsystemFiles = [
   'session-handoff.md',
   // Subsystem 5: Mechanical Linters, Git Hooks & Guardrails
   'eslint.config.mjs',
+  '.jscpd.json',
   'commitlint.config.mjs',
   'harness/validate-harness.mjs',
   'harness/verify-architecture.mjs',
+  'harness/verify-duplication.mjs',
   'harness/verify-commit-msg.mjs',
   'harness/victory-detector.mjs',
+  'sops/jscpd-dry-refactoring.md',
   '.githooks/pre-commit',
   '.githooks/commit-msg',
 ];

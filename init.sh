@@ -38,6 +38,7 @@ pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 echo "--> [3/6] Running mechanical harness checks..."
 node harness/validate-harness.mjs
 node harness/verify-architecture.mjs
+node harness/verify-duplication.mjs
 if git rev-parse --verify HEAD >/dev/null 2>&1; then
   node harness/verify-commit-msg.mjs --last
 fi

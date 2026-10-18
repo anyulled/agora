@@ -103,3 +103,18 @@
   - Updated `README.md` Section 2 with C4 Level 1 System Context, C4 Level 2 Container, and Live Session Sequence diagrams.
 - **Verification Evidence**:
   - `./init.sh` and `pnpm run verify`: 13/13 test suites (129 tests) passing, 0 ESLint/Biome/typecheck errors.
+
+---
+
+## Session 007 — 2026-10-18
+- **Role**: jscpd Duplication Guardrail & DRY Refactoring Engineer (`flash_lite`)
+- **Goals**:
+  1. Configure `jscpd` (`.jscpd.json`) and `harness/verify-duplication.mjs` (`pnpm run lint:dup`) enforcing a strict `<= 10%` duplication threshold (both total and per-file) with a clear, actionable DRY refactoring message.
+  2. Encode `jscpd` and `dry-refactoring` agent skills in `sops/jscpd-dry-refactoring.md` and refactor clone hotspots in `apps/worker/src/index.ts`.
+- **Completed**:
+  - Added `.jscpd.json`, `harness/verify-duplication.mjs`, `harness/verify-duplication.d.mts`, and `sops/jscpd-dry-refactoring.md`.
+  - Refactored poll result summary and word-cloud aggregation clones in `apps/worker/src/index.ts` (reducing `worker/src/index.ts` duplication from `11.2%` to `8.7%` and overall duplication to `1.7%`).
+  - Integrated `node harness/verify-duplication.mjs` into `pnpm run lint`, `init.sh`, `.githooks/pre-commit`, `harness/validate-harness.mjs`, `harness/victory-detector.mjs`, and `tests/integration/commitlint.test.ts`.
+- **Verification Evidence**:
+  - `pnpm run lint:dup`: `1.7% total duplication <= 10% threshold; 0 files > 10%`.
+  - `./init.sh` and `pnpm run verify`: 13/13 test suites (130 tests) passing.

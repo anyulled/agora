@@ -42,6 +42,7 @@ const layer1Files = [
   'tsconfig.json',
   'biome.json',
   'eslint.config.mjs',
+  '.jscpd.json',
   'SPECIFICATION.md',
   'ARCHITECTURE.md',
   'AGENTS.md',
@@ -58,12 +59,14 @@ const layer1Files = [
   'docs/adr/0002-browser-dom-capture-and-native-pdf-export.md',
   'sops/chrome-devtools-validation-loop.md',
   'sops/encode-knowledge-into-repo.md',
+  'sops/jscpd-dry-refactoring.md',
   'sops/layered-domain-architecture.md',
   'sops/observability-feedback-loop.md',
   'harness/failure-signals-checklist.md',
   'harness/clean-state-checklist.md',
   'harness/evaluator-rubric.md',
   'harness/quality-document.md',
+  'harness/verify-duplication.mjs',
 ];
 
 let layer1Missing = 0;

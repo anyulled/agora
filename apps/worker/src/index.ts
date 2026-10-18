@@ -253,6 +253,44 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     return event;
   }
 
+  function buildPollResultsSummary(poll: PollDefinition): PollResultsSummary {
+    const votes = store.pollVotes.get(poll.id) || new Map<string, string>();
+    const counts: Record<string, number> = {};
+    for (const opt of poll.options) {
+      counts[opt.id] = 0;
+    }
+    for (const optId of votes.values()) {
+      counts[optId] = (counts[optId] || 0) + 1;
+    }
+    return {
+      pollId: poll.id,
+      slideId: poll.slideId,
+      status: poll.status,
+      resultsRevealed: poll.resultsRevealed,
+      totalResponses: votes.size,
+      countsByOptionId: counts,
+    };
+  }
+
+  function buildWordCloudAggregate(wc: WordCloudPrompt): WordCloudAggregate {
+    const subs = store.wordCloudSubmissions.get(wc.id) || [];
+    const termCounts: Record<string, number> = {};
+    for (const sub of subs) {
+      termCounts[sub.term] = (termCounts[sub.term] || 0) + 1;
+    }
+    const terms = Object.entries(termCounts)
+      .map(([term, count]) => ({ term, count }))
+      .sort((a, b) => b.count - a.count);
+
+    return {
+      promptId: wc.id,
+      slideId: wc.slideId,
+      status: wc.status,
+      totalSubmissions: subs.length,
+      terms,
+    };
+  }
+
   async function handleRequest(request: Request, _env?: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -590,44 +628,14 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
 
       const questions = store.questions.get(sessionId) || [];
       const sessionPolls = store.polls.get(sessionId) || [];
-      const activePolls: PollResultsSummary[] = sessionPolls.map((poll) => {
-        const votes = store.pollVotes.get(poll.id) || new Map();
-        const counts: Record<string, number> = {};
-        for (const opt of poll.options) {
-          counts[opt.id] = 0;
-        }
-        for (const optId of votes.values()) {
-          counts[optId] = (counts[optId] || 0) + 1;
-        }
-        return {
-          pollId: poll.id,
-          slideId: poll.slideId,
-          status: poll.status,
-          resultsRevealed: poll.resultsRevealed,
-          totalResponses: votes.size,
-          countsByOptionId: counts,
-        };
-      });
+      const activePolls: PollResultsSummary[] = sessionPolls.map((poll) =>
+        buildPollResultsSummary(poll),
+      );
 
       const sessionWordClouds = store.wordClouds.get(sessionId) || [];
-      const activeWordClouds: WordCloudAggregate[] = sessionWordClouds.map((wc) => {
-        const subs = store.wordCloudSubmissions.get(wc.id) || [];
-        const termCounts: Record<string, number> = {};
-        for (const sub of subs) {
-          termCounts[sub.term] = (termCounts[sub.term] || 0) + 1;
-        }
-        const terms = Object.entries(termCounts)
-          .map(([term, count]) => ({ term, count }))
-          .sort((a, b) => b.count - a.count);
-
-        return {
-          promptId: wc.id,
-          slideId: wc.slideId,
-          status: wc.status,
-          totalSubmissions: subs.length,
-          terms,
-        };
-      });
+      const activeWordClouds: WordCloudAggregate[] = sessionWordClouds.map((wc) =>
+        buildWordCloudAggregate(wc),
+      );
 
       const reactionMap = store.reactions.get(sessionId) || new Map();
       const reactionSummary: Record<string, ReactionCounts> = {};
@@ -1016,23 +1024,9 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
 
       votes.set(participant.id, body.optionId);
 
-      const counts: Record<string, number> = {};
-      for (const opt of poll.options) {
-        counts[opt.id] = 0;
-      }
-      for (const optId of votes.values()) {
-        counts[optId] = (counts[optId] || 0) + 1;
-      }
-
-      const totalResponses = votes.size;
-      const summary: PollResultsSummary = {
-        pollId,
-        slideId: poll.slideId,
-        status: poll.status,
-        resultsRevealed: poll.resultsRevealed,
-        totalResponses,
-        countsByOptionId: counts,
-      };
+      const summary = buildPollResultsSummary(poll);
+      const counts = summary.countsByOptionId;
+      const totalResponses = summary.totalResponses;
 
       // Evaluate adaptive navigation rules
       const rules = store.navigationRules.get(session.presentationId) || [];
@@ -1145,21 +1139,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       }
       subs.push({ participantId: participant.id, term: normalized });
 
-      const termCounts: Record<string, number> = {};
-      for (const sub of subs) {
-        termCounts[sub.term] = (termCounts[sub.term] || 0) + 1;
-      }
-      const terms = Object.entries(termCounts)
-        .map(([term, count]) => ({ term, count }))
-        .sort((a, b) => b.count - a.count);
-
-      const aggregate: WordCloudAggregate = {
-        promptId,
-        slideId: prompt.slideId,
-        status: prompt.status,
-        totalSubmissions: subs.length,
-        terms,
-      };
+      const aggregate = buildWordCloudAggregate(prompt);
 
       broadcastRealtimeEvent(sessionId, 'wordcloud.updated', aggregate);
       return jsonResponse(aggregate);
