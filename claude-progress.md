@@ -90,3 +90,16 @@
   - Added ESLint verification test in `tests/integration/commitlint.test.ts` and ESLint badge in `README.md`.
 - **Verification Evidence**:
   - `pnpm run lint:eslint`, `./init.sh`, and `pnpm run verify`: 13/13 test suites (129 tests) passing, 0 ESLint/Biome/typecheck warnings or errors.
+
+---
+
+## Session 006 — 2026-10-18
+- **Role**: C4 Model & Sequence Architecture Author (`flash_lite`)
+- **Goals**:
+  1. Document the complete system architecture in `ARCHITECTURE.md` and `README.md` with C4 Model diagrams (Levels 1–4: System Context, Container, Component, and Code/Domain Class Diagrams).
+  2. Add Entity-Relationship (`erDiagram`), Session/Asset Lifecycle State Machine (`stateDiagram-v2`), and 6 comprehensive end-to-end Sequence Diagrams (`sequenceDiagram`).
+- **Completed**:
+  - Updated `ARCHITECTURE.md` (662 lines) with 12 Mermaid diagrams covering C4 Levels 1–4, D1/Durable Object SQLite ER schema, Session & Asset State Machine, and 6 end-to-end sequence diagrams (`SPEC-001` through `SPEC-024`).
+  - Updated `README.md` Section 2 with C4 Level 1 System Context, C4 Level 2 Container, and Live Session Sequence diagrams.
+- **Verification Evidence**:
+  - `./init.sh` and `pnpm run verify`: 13/13 test suites (129 tests) passing, 0 ESLint/Biome/typecheck errors.

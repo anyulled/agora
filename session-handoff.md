@@ -10,6 +10,7 @@
 - Conventional Commits (`commitlint.config.mjs`, `harness/verify-commit-msg.mjs`), ESLint 9 strict flat configuration (`eslint.config.mjs`), Biome formatting/linting (`biome.json`), and rapid-feedback Git hooks (`.githooks/pre-commit`, `.githooks/commit-msg`) are active and enforced locally and in CI.
 
 ## Changed This Session
+- Documented full **C4 Model (Levels 1–4: System Context, Container, Component, Code/Domain Class Diagrams)**, **D1 + Durable Object SQLite Entity-Relationship Diagram**, **Session & Asset State Machine**, and **6 End-to-End Sequence Diagrams** in `ARCHITECTURE.md` and `README.md`.
 - Added `eslint.config.mjs` enforcing `@eslint/js` recommended, `typescript-eslint` `strict` + `stylistic` rules, and Clean Architecture `no-restricted-imports` boundaries on `packages/domain` and `packages/application`.
 - Wired `eslint . --max-warnings=0` (`pnpm run lint:eslint`) into `package.json`, `init.sh`, `.githooks/pre-commit`, `.github/workflows/ci.yml`, `harness/validate-harness.mjs`, and `harness/victory-detector.mjs`.
 - Updated `README.md` with the Ancient Greek title (`# 🏛️ Ἀγορά · ΑΓΟΡΑ (Ágora)`) and 35 badges (including SonarCloud/SonarQube, ESLint 9 Flat Config, CI/CD, and Harness Engineering).

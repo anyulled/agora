@@ -77,49 +77,128 @@
 
 ---
 
-## 2. System Architecture & Clean Boundaries
+## 2. System Architecture & C4 Model Diagrams
 
-Ágora enforces strict Clean Architecture principles. `packages/domain` and `packages/application` remain 100% pure TypeScript modules with **zero dependencies** on React, DOM, Cloudflare Workers runtime APIs, or Reveal.js.
+Ágora enforces strict Clean Architecture principles. `packages/domain` and `packages/application` remain 100% pure TypeScript modules with **zero dependencies** on React, DOM, Cloudflare Workers runtime APIs, or Reveal.js (mechanically enforced by [`verify-architecture.mjs`](./harness/verify-architecture.mjs) and [`eslint.config.mjs`](./eslint.config.mjs)).
 
-### Architecture Flow
+> 📐 **Full Architectural Blueprint**: See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the complete **C4 Model (Levels 1–4: System Context, Container, Component, and Code Class Diagrams)**, **D1 + Durable Object SQLite Entity-Relationship Diagram**, **Session & Asset State Machine**, and **6 End-to-End Sequence Diagrams**.
+
+### C4 Level 1 — System Context Diagram
 
 ```mermaid
 flowchart TD
-    subgraph Clients ["Client Applications"]
-        AdminApp["Admin Dashboard (React)"]
-        PresenterApp["Presenter Deck (Reveal.js)"]
-        ProjectorApp["Big Screen Projector"]
-        AudienceApp["Audience Mobile / Web"]
+    subgraph Actors ["External Actors & Personas"]
+        Admin["Presentation Admin / Author"]
+        Presenter["Conference Speaker / Presenter"]
+        Projector["Venue Public Projector"]
+        Attendee["Conference Attendee (300-1,000 Peers)"]
     end
 
-    Clients -->|"HTTP / WebSocket"| CFWorker["Cloudflare Worker (Router / API Gateway)"]
-
-    subgraph Cloudflare ["Cloudflare Edge Runtime"]
-        CFWorker -->|Static Assets| R2["Cloudflare R2 (Deck Storage & Assets)"]
-        CFWorker -->|Relational Data| D1["Cloudflare D1 (Global DB)"]
-        CFWorker -->|Realtime State| DO["SessionCoordinator Durable Object (Embedded SQLite)"]
+    subgraph AgoraSystem ["Ágora Interactive Conference Platform (System Boundary)"]
+        AgoraCore["Ágora Edge & Real-Time Platform"]
     end
 
-    subgraph Core ["Core Packages"]
-        CFWorker -.-> AppLayer["@agora/application (Use Cases)"]
-        AppLayer -.-> DomainLayer["@agora/domain (Entities & Rules)"]
-        Contracts["@agora/contracts (Shared DTOs & Event Schemas)"] -.-> Clients
-        Contracts -.-> Core
+    subgraph BrowserEngines ["Browser Native Capabilities"]
+        RevealEngine["Reveal.js Presentation Engine"]
+        DomPrintEngine["Browser DOM Canvas & Print-PDF Engine"]
     end
+
+    Admin -->|"Authors decks, generates PNG/PDF assets, starts sessions (HTTPS)"| AgoraCore
+    Admin -->|"Renders final-fragment PNGs & ?print-pdf"| DomPrintEngine
+    Presenter -->|"Navigates deck, moderates Q&A, confirms adaptive jumps (WSS/HTTPS)"| AgoraCore
+    Presenter -->|"Presents HTML deck offline-first"| RevealEngine
+    AgoraCore -->|"Projects active slide & embedded Q&A detail view (WSS)"| Projector
+    Attendee -->|"Follow/Solo nav, Q&A, upvotes, reactions, polls, PNG/PDF downloads (WSS/HTTPS)"| AgoraCore
+```
+
+### C4 Level 2 — Container Diagram
+
+```mermaid
+flowchart TD
+    subgraph ClientTier ["Client Tier (Browser Containers)"]
+        AdminSPA["apps/admin (Admin Dashboard SPA)"]
+        PresenterApp["apps/presenter (Speaker Deck + RevealAudience Plugin)"]
+        AudiencePWA["apps/audience (Mobile Audience Companion)"]
+        SlideExportPkg["packages/slide-export (SlideRenderer + Print-PDF)"]
+    end
+
+    subgraph EdgeTier ["Cloudflare Edge Tier (Worker & Stateful Compute)"]
+        WorkerGateway["apps/worker (Cloudflare Worker API Gateway)"]
+        SessionDO["SessionCoordinatorDO (Durable Object + WebSocket Hibernation)"]
+    end
+
+    subgraph StorageTier ["Storage Tier (Local Emulated via node:sqlite or Cloudflare Edge)"]
+        D1DB[("Cloudflare D1 SQLite (Presentations, Slides, Manifests, Rules)")]
+        DOSQLite[("Durable Object Embedded SQLite (Session State, Q&A, Votes, Dedup)")]
+        R2Store[("Cloudflare R2 Private Bucket (Slide PNGs & Full Deck PDF)")]
+    end
+
+    subgraph CorePackages ["Pure Core Packages (Zero Runtime/UI Dependencies)"]
+        AppLayer["packages/application (AgoraPlatformService Use Cases)"]
+        DomainLayer["packages/domain (Pure Entities, Invariants & RateLimiter)"]
+        ContractsPkg["packages/contracts (Shared DTOs & RealtimeEvent Envelopes)"]
+    end
+
+    AdminSPA -->|"Uses"| SlideExportPkg
+    AdminSPA -->|"REST API (/api/v1/presentations/*)"| WorkerGateway
+    PresenterApp -->|"REST & WebSocket (/api/v1/sessions/*)"| WorkerGateway
+    AudiencePWA -->|"REST & WebSocket (/api/v1/sessions/*)"| WorkerGateway
+
+    WorkerGateway -->|"Coordinates live session & WebSockets"| SessionDO
+    WorkerGateway -->|"Reads/Writes metadata & manifests"| D1DB
+    WorkerGateway -->|"Gates private PNG & PDF downloads"| R2Store
+    SessionDO -->|"ACID transactions (ctx.storage.sql)"| DOSQLite
+
+    WorkerGateway -.->|"Invokes"| AppLayer
+    SessionDO -.->|"Invokes"| AppLayer
+    AppLayer -.->|"Enforces"| DomainLayer
+    DomainLayer -.->|"Types"| ContractsPkg
+```
+
+### Live Session & Embedded Q&A Sequence Overview
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Presenter as Speaker (Reveal.js)
+    participant Worker as Cloudflare Worker / SessionCoordinatorDO
+    actor Attendee as Audience Client (Follow / Solo)
+    participant R2 as Private R2 Bucket (PNG / PDF)
+
+    Presenter->>Worker: POST /sessions/:id/slide (slide-1 -> slide-3, skipping slide-2)
+    Worker-->>Attendee: WSS slide.changed (currentSlideId="slide-3", revealed=["slide-1","slide-3"])
+    Note over Attendee: Follow mode tracks slide-3 (no slide body content leaked).<br/>Solo mode browses ["slide-1","slide-3"]; skipped "slide-2" stays locked (403).
+    Attendee->>Worker: POST /sessions/:id/questions ("How does D1 sync work?" on slide-3)
+    Attendee->>Worker: POST /sessions/:id/questions/:qId/upvote (Idempotent composite PK)
+    Note over Presenter: Speaker reaches embedded Q&A slide (data-component="audience-qa") and clicks question
+    Presenter->>R2: Fetch static PNG for referenced slide-3 (Internal Q&A Detail View)
+    Note over Presenter: Projector stays locked on Q&A slide without navigating Reveal.js deck!
+    Presenter->>Worker: POST /sessions/:id/slide (endingSlideId)
+    Worker-->>Attendee: WSS presentation.download.unlocked (pdfDownloadUnlocked=true, status="live")
+    Attendee->>R2: GET /sessions/:id/download (Authorized Full Deck PDF)
 ```
 
 ### Monorepo Directory Tree
 ```text
-agora/
+/Users/alrs/Documents/agora/
+├── apps/
+│   ├── admin/               # Presentation CRUD, DOM PNG capture, native PDF export
+│   ├── audience/            # Mobile companion (Follow/Solo modes, Q&A, reactions, polls)
+│   ├── presenter/           # Speaker viewport, directional controls, embedded Q&A detail view
+│   └── worker/              # Cloudflare Worker router, SessionCoordinatorDO & local emulator
 ├── packages/
-│   ├── contracts/       # Shared DTOs, WebSocket event types & API schemas
-│   ├── domain/          # Pure business entities, value objects & invariants
-│   ├── application/     # Use cases, command handlers & port definitions
-│   ├── backend/         # Cloudflare Worker, D1 migrations & Durable Objects
-│   └── frontend/        # Admin, Presenter, Projector & Audience web apps
-├── harness/             # Mechanical verification scripts, arch tests & victory detectors
-├── docs/                # ADRs, design specs, security & reliability guides
-└── .githooks/           # Git hooks (pre-commit, commit-msg conventional commit verifier)
+│   ├── contracts/           # Shared TypeScript DTOs, API & WebSocket RealtimeEvent contracts
+│   ├── domain/              # 100% pure business rules, invariants & sliding-window RateLimiter
+│   ├── application/         # Pure use-case orchestration (AgoraPlatformService)
+│   ├── reveal-plugin/       # Reusable RevealAudience plugin with offline resilience & backoff
+│   └── slide-export/        # BrowserDomSlideRenderer (final-fragment PNG) & ?print-pdf helper
+├── infrastructure/
+│   └── cloudflare/          # wrangler.toml, schema.sql, D1 migrations & local-emulate-check.mjs
+├── harness/                 # 14-Practice harness validators, architecture linter & victory gate
+├── docs/                    # Progressive disclosure docs & ADRs
+├── sops/                    # Standard Operating Procedures
+├── tests/                   # Unit, integration, E2E multi-actor, and 500-1,000 user load tests
+└── .githooks/               # Rapid-feedback Git hooks (pre-commit & commit-msg)
 ```
 
 ---
