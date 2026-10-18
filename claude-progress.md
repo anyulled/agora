@@ -186,3 +186,29 @@
 - **Verification Evidence**:
   - `./init.sh` and `pnpm run verify`: 13/13 test suites (137 tests) passing.
 
+---
+
+## Session 012 — 2026-10-19
+- **Role**: Audience Follow Mode & Real-Time Sync Engineer (`#10 SPEC-004`)
+- **Goals**:
+  1. Implement `#10 SPEC-004: Follow mode` (Priority 4 in `feature_list.json`):
+     - Ensure Follow mode is active by default when audience member joins session.
+     - Listen to incoming `slide.changed` events from the Durable Object WebSocket connection, updating client view in real time to match speaker's active slide.
+     - Format and display slide title and slide position indicator (e.g. `Slide 12 of 45`).
+     - Strictly guarantee omission of slide visual graphics, body text, and fragment steps (`containsSlideBodyContent: false`).
+     - Provide contextual interaction controls: Ask Question, Emoji Reactions (`👍`, `🤔`, `❤️`, `😴`), and Gated Downloads (when unlocked).
+     - Implement WebSocket connection management with exponential backoff auto-reconnect and immediate speaker position resynchronization via `session.state` and `GET /api/v1/sessions/:id`.
+     - Provide reactive event subscription (`subscribe`) for instantaneous UI updates.
+- **Completed**:
+  - Exported `WebSocketLike` interface in `@agora/contracts` and re-exported it in `@agora/reveal-plugin`.
+  - Implemented real-time WebSocket sync in `AudienceAppController` (`apps/audience/src/index.ts`):
+    - `handleRealtimeEvent` and `handleMessage` for `slide.changed`, `session.state`, `question.*`, `reaction.summary`, and `presentation.download.unlocked`.
+    - Real-time slide tracking in default Follow mode, updating active slide, revealed slides set, and position indicator (`positionIndicator`, e.g. `Slide 12 of 45`).
+    - Reactive subscriber mechanism (`subscribe`) for instantaneous UI updates.
+    - WebSocket connection manager (`connectWebSocket`, `disconnect`) with exponential backoff auto-reconnect (`computeBackoffDelayMs`) and HTTP session state re-hydration (`refreshSessionState`).
+    - Invariant preservation: `containsSlideBodyContent: false` strictly enforced, omitting slide visual graphics, body text, canvas, and fragment steps.
+  - Added unit test coverage in `apps/audience/src/__tests__/audience.test.ts` (20 tests) and integration test in `tests/integration/worker-api.test.ts` (7 tests).
+- **Verification Evidence**:
+  - `./init.sh` and `pnpm run verify`: 13/13 test suites (143 tests) passing, 0 ESLint warnings, 0 typecheck errors, 1.5% code duplication (`<= 10%`).
+
+

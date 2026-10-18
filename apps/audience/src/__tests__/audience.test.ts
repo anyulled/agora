@@ -1,6 +1,16 @@
-import type { AudienceSafeSessionView, SlideMetadata } from '@agora/contracts';
-import { beforeEach, describe, expect, it } from 'vitest';
-import { AudienceAppController, renderAudienceHtml } from '../index.js';
+import type {
+  AudienceSafeSessionView,
+  RealtimeEvent,
+  SlideMetadata,
+  WebSocketLike,
+} from '@agora/contracts';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  AudienceAppController,
+  buildAudienceWebSocketUrl,
+  computeBackoffDelayMs,
+  renderAudienceHtml,
+} from '../index.js';
 
 describe('AudienceAppController (SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-009, SPEC-010, SPEC-014, SPEC-016, SPEC-021)', () => {
   let audience: AudienceAppController;
@@ -103,6 +113,7 @@ describe('AudienceAppController (SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-00
   describe('Follow Mode & No Slide Content Leakage (SPEC-004)', () => {
     it('defaults to Follow mode, tracking speaker slide in real time', () => {
       expect(audience.getMode()).toBe('follow');
+      expect(audience.isFollowing()).toBe(true);
       expect(audience.getActiveSlide()?.title).toBe('Intro Slide');
 
       // Speaker moves to s2
@@ -115,6 +126,134 @@ describe('AudienceAppController (SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-00
       expect(audience.getActiveSlide()?.title).toBe('Architecture');
     });
 
+    it('updates view in real time upon receiving slide.changed real-time WebSocket event', () => {
+      const event: RealtimeEvent = {
+        id: 'evt-slide-change-1',
+        type: 'slide.changed',
+        sessionId: 'sess_123',
+        timestamp: new Date().toISOString(),
+        payload: {
+          slideId: 's2',
+          horizontalIndex: 1,
+          verticalIndex: 0,
+          timestamp: new Date().toISOString(),
+          revealedSlideIds: ['s1', 's2'],
+        },
+      };
+
+      audience.handleRealtimeEvent(event);
+
+      expect(audience.getActiveSlideId()).toBe('s2');
+      expect(audience.getActiveSlide()?.title).toBe('Architecture');
+      const vm = audience.getViewModel();
+      expect(vm.activeSlide?.id).toBe('s2');
+      expect(vm.totalRevealedSlides).toBe(2);
+      expect(vm.positionIndicator).toBe('Slide 2 of 4');
+    });
+
+    it('dispatches reactive subscriber updates immediately on slide.changed and session.state events', () => {
+      const recordedSlideIds: (string | undefined)[] = [];
+      const unsubscribe = audience.subscribe((vm) => {
+        recordedSlideIds.push(vm.activeSlide?.id);
+      });
+
+      // Initial subscription notification
+      expect(recordedSlideIds).toEqual(['s1']);
+
+      // Raw WebSocket frame arrival
+      audience.handleMessage(
+        JSON.stringify({
+          id: 'evt-2',
+          type: 'slide.changed',
+          sessionId: 'sess_123',
+          payload: {
+            slideId: 's2',
+            horizontalIndex: 1,
+            verticalIndex: 0,
+            revealedSlideIds: ['s1', 's2'],
+          },
+        }),
+      );
+
+      expect(recordedSlideIds).toEqual(['s1', 's2']);
+
+      // session.state snapshot event
+      audience.handleRealtimeEvent({
+        id: 'evt-3',
+        type: 'session.state',
+        sessionId: 'sess_123',
+        timestamp: new Date().toISOString(),
+        payload: {
+          currentSlideId: 's4',
+          revealedSlideIds: ['s1', 's2', 's4'],
+          pdfDownloadUnlocked: true,
+        },
+      });
+
+      expect(recordedSlideIds).toEqual(['s1', 's2', 's4']);
+
+      // Unsubscribe stops future notifications
+      unsubscribe();
+      audience.handleMessage(
+        JSON.stringify({
+          id: 'evt-4',
+          type: 'slide.changed',
+          sessionId: 'sess_123',
+          payload: { slideId: 's1', horizontalIndex: 0, verticalIndex: 0 },
+        }),
+      );
+
+      expect(recordedSlideIds).toEqual(['s1', 's2', 's4']);
+    });
+
+    it('formats and displays slide title and slide position indicator (e.g. Slide 12 of 45)', () => {
+      // 1. Position indicator on current 4-slide deck
+      const vm1 = audience.getViewModel();
+      expect(vm1.positionIndicator).toBe('Slide 1 of 4');
+
+      // 2. Large 45-slide presentation test case matching acceptance criteria explicitly
+      const largeSlides: SlideMetadata[] = Array.from({ length: 45 }, (_, idx) => ({
+        id: `slide_${idx + 1}`,
+        presentationId: 'p_large',
+        title: `Topic Chapter ${idx + 1}`,
+        horizontalIndex: idx,
+        verticalIndex: 0,
+        order: idx,
+      }));
+
+      const largeAudience = new AudienceAppController('sess_large');
+      largeAudience.syncSessionView({
+        session: {
+          id: 'sess_large',
+          presentationId: 'p_large',
+          presentationRevision: 'rev_1',
+          status: 'live',
+          currentSlideId: 'slide_12',
+          revealedSlideIds: Array.from({ length: 12 }, (_, i) => `slide_${i + 1}`),
+          pdfDownloadUnlocked: false,
+        },
+        slides: largeSlides,
+        availablePngSlideIds: ['slide_12'],
+        pdfAvailable: true,
+        questions: [],
+        activePolls: [],
+        activeWordClouds: [],
+        reactionSummary: {},
+      });
+
+      const largeVm = largeAudience.getViewModel();
+      expect(largeVm.positionIndicator).toBe('Slide 12 of 45');
+      expect(largeVm.activeSlide?.title).toBe('Topic Chapter 12');
+
+      const html = renderAudienceHtml(largeVm);
+      expect(html).toContain('Slide 12 of 45');
+      expect(html).toContain('Topic Chapter 12');
+      expect(html).toContain(
+        '<p class="slide-position-indicator" aria-label="Slide position">Slide 12 of 45</p>',
+      );
+      expect(html).toContain('Following Speaker');
+    });
+
     it('strictly guarantees that view model and HTML never contain slide deck body content (SPEC-004)', () => {
       const vm = audience.getViewModel();
       expect(vm.containsSlideBodyContent).toBe(false);
@@ -124,6 +263,92 @@ describe('AudienceAppController (SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-00
       expect(html).not.toContain('<div class="slides">');
       expect(html).not.toContain('<section class="slide-content">');
       expect(html).not.toContain('deck-body');
+      expect(html).not.toContain('<canvas');
+      expect(html).not.toContain('data-fragment');
+      expect(html).not.toContain('<markdown>');
+    });
+
+    it('renders contextual interaction controls: Ask Question form, Emoji Reactions, and Download controls', () => {
+      const vm = audience.getViewModel();
+      const html = renderAudienceHtml(vm);
+
+      // Question Form
+      expect(html).toContain('Ask a Question');
+      expect(html).toContain('data-action="submit-question"');
+      expect(html).toContain('aria-label="Question text"');
+
+      // Emoji Reactions Bar
+      expect(html).toContain('aria-label="Emoji Reactions"');
+      expect(html).toContain('data-reaction="👍"');
+      expect(html).toContain('data-reaction="🤔"');
+      expect(html).toContain('data-reaction="❤️"');
+      expect(html).toContain('data-reaction="😴"');
+
+      // Downloads Bar
+      expect(html).toContain('Slide & Deck Downloads');
+      expect(html).toContain('Download Slide PNG');
+      expect(html).toContain('Deck PDF Locked');
+    });
+
+    it('manages WebSocket connection and auto-reconnect backoff (SPEC-004, SPEC-019)', async () => {
+      expect(buildAudienceWebSocketUrl('https://api.agora.test', 'sess_1', 'tok_abc')).toBe(
+        'wss://api.agora.test/api/v1/sessions/sess_1/ws?token=tok_abc',
+      );
+      expect(buildAudienceWebSocketUrl('http://localhost:8787', 'sess_2')).toBe(
+        'ws://localhost:8787/api/v1/sessions/sess_2/ws',
+      );
+
+      expect(computeBackoffDelayMs(0, 1000, 30000)).toBe(1000);
+      expect(computeBackoffDelayMs(1, 1000, 30000)).toBe(2000);
+      expect(computeBackoffDelayMs(2, 1000, 30000)).toBe(4000);
+      expect(computeBackoffDelayMs(15, 1000, 30000)).toBe(30000);
+
+      // WebSocket mock connection
+      let socketInstance: WebSocketLike | null = null;
+      const mockFactory = (_url: string): WebSocketLike => {
+        const sock: WebSocketLike = {
+          readyState: 1,
+          send: vi.fn(),
+          close: vi.fn(),
+        };
+        socketInstance = sock;
+        return sock;
+      };
+
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          ...createInitialView(),
+          session: {
+            ...createInitialView().session,
+            currentSlideId: 's2',
+            revealedSlideIds: ['s1', 's2'],
+          },
+        }),
+      });
+
+      audience.connectWebSocket({
+        sessionId: 'sess_123',
+        endpoint: 'https://api.agora.test',
+        webSocketFactory: mockFactory,
+        fetchFn: mockFetch as unknown as typeof fetch,
+      });
+
+      expect(socketInstance).not.toBeNull();
+      const currentSocket = socketInstance as unknown as WebSocketLike;
+
+      // Trigger socket onopen -> refreshes session state immediately
+      await currentSocket.onopen?.({});
+      expect(mockFetch).toHaveBeenCalledWith('https://api.agora.test/api/v1/sessions/sess_123');
+      expect(audience.getActiveSlideId()).toBe('s2');
+      expect(audience.getViewModel().connected).toBe(true);
+
+      // Simulate disconnect
+      currentSocket.onclose?.({});
+      expect(audience.getViewModel().connected).toBe(false);
+
+      audience.disconnect();
+      expect(audience.getViewModel().connected).toBe(false);
     });
   });
 

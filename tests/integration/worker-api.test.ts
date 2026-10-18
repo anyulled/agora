@@ -9,6 +9,7 @@ import type {
   WordCloudAggregate,
 } from '@agora/contracts';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { AudienceAppController } from '../../apps/audience/src/index';
 import { createAgoraWorkerApp } from '../../apps/worker/src/index';
 
 describe('Worker HTTP API Integration Tests', () => {
@@ -725,5 +726,107 @@ describe('Worker HTTP API Integration Tests', () => {
     expect(backwardOk).toBe(true);
     expect(app.store.sessions.get(session.id)?.currentSlideId).toBe('slide-0');
     expect(app.store.sessions.get(session.id)?.revealedSlideIds).toEqual(['slide-0', 'slide-1-1']);
+  });
+
+  it('synchronizes AudienceAppController in Follow mode with presenter navigation via WebSocket (SPEC-004)', async () => {
+    // 1. Create presentation and session
+    const presRes = await app.fetch(
+      new Request('https://api.agora.test/api/v1/presentations', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'Realtime Follow Deck',
+          endingSlideId: 'slide-end',
+          slides: [
+            {
+              id: 'slide-1',
+              presentationId: 'p-follow',
+              title: 'Intro',
+              horizontalIndex: 0,
+              verticalIndex: 0,
+              order: 0,
+            },
+            {
+              id: 'slide-2',
+              presentationId: 'p-follow',
+              title: 'Deep Dive',
+              horizontalIndex: 1,
+              verticalIndex: 0,
+              order: 1,
+            },
+            {
+              id: 'slide-end',
+              presentationId: 'p-follow',
+              title: 'Summary',
+              horizontalIndex: 2,
+              verticalIndex: 0,
+              order: 2,
+            },
+          ],
+        }),
+      }),
+    );
+    const pres = (await presRes.json()) as Presentation;
+
+    const sessRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/presentations/${pres.id}/sessions`, {
+        method: 'POST',
+        headers: adminHeaders,
+      }),
+    );
+    const session = (await sessRes.json()) as PresentationSession & { presenterToken: string };
+    const coordinator = app.getCoordinator(session.id);
+
+    // 2. Initial audience fetch
+    const audienceSafeRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}`),
+    );
+    const initialView = (await audienceSafeRes.json()) as AudienceSafeSessionView;
+
+    const audience = new AudienceAppController(session.id);
+    audience.syncSessionView(initialView);
+
+    expect(audience.isFollowing()).toBe(true);
+    expect(audience.getActiveSlide()?.id).toBe('slide-1');
+    expect(audience.getViewModel().positionIndicator).toBe('Slide 1 of 3');
+
+    // 3. Connect presenter socket and audience socket to coordinator
+    const presenterWs = {
+      readyState: WebSocket.OPEN,
+      send: () => {},
+      close: () => {},
+    } as unknown as WebSocket;
+
+    const audienceWs = {
+      readyState: WebSocket.OPEN,
+      send: (rawMsg: string) => {
+        audience.handleMessage(rawMsg);
+      },
+      close: () => {},
+    } as unknown as WebSocket;
+
+    coordinator.handleConnection(presenterWs, 'https://agora.test', session.presenterToken);
+    coordinator.handleConnection(audienceWs, 'https://agora.test', null);
+
+    // 4. Presenter navigates forward to slide-2
+    coordinator.handleMessage(
+      presenterWs,
+      JSON.stringify({
+        id: 'evt-nav-2',
+        type: 'slide.changed',
+        sessionId: session.id,
+        payload: {
+          slideId: 'slide-2',
+          horizontalIndex: 1,
+          verticalIndex: 0,
+          timestamp: new Date().toISOString(),
+        },
+      }),
+    );
+
+    // Audience automatically followed speaker in real time
+    expect(audience.getActiveSlide()?.id).toBe('slide-2');
+    expect(audience.getActiveSlide()?.title).toBe('Deep Dive');
+    expect(audience.getViewModel().positionIndicator).toBe('Slide 2 of 3');
   });
 });

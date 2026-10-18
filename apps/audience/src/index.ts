@@ -7,9 +7,21 @@ import {
   type PollResultsSummary,
   type Reaction,
   type ReactionCounts,
+  type RealtimeEvent,
   type SlideMetadata,
+  type WebSocketLike,
   type WordCloudAggregate,
 } from '@agora/contracts';
+
+export interface AudienceConfig {
+  sessionId: string;
+  endpoint: string;
+  participantToken?: string;
+  reconnectBaseMs?: number;
+  reconnectMaxMs?: number;
+  fetchFn?: typeof fetch;
+  webSocketFactory?: (url: string) => WebSocketLike;
+}
 
 export interface AudienceViewModel {
   sessionId: string;
@@ -18,11 +30,12 @@ export interface AudienceViewModel {
   connected: boolean;
   activeSlide: SlideMetadata | null;
   activeSlideIndex: number;
+  positionIndicator: string; // SPEC-004: e.g. "Slide 12 of 45"
   totalRevealedSlides: number;
   totalPresentationSlides: number;
   canNavigateSoloPrev: boolean;
   canNavigateSoloNext: boolean;
-  containsSlideBodyContent: false;
+  containsSlideBodyContent: false; // SPEC-004: Invariant
   canDownloadCurrentSlidePng: boolean;
   canDownloadDeckPdf: boolean;
   currentSlidePngUrl: string | null;
@@ -31,6 +44,27 @@ export interface AudienceViewModel {
   questions: AudienceQuestion[];
   activePoll: PollResultsSummary | null;
   activeWordCloud: WordCloudAggregate | null;
+}
+
+export function computeBackoffDelayMs(attempt: number, baseMs = 1000, maxMs = 30000): number {
+  if (attempt <= 0) return baseMs;
+  const exponent = Math.min(attempt, 10);
+  const delay = baseMs * 2 ** exponent;
+  return Math.min(delay, maxMs);
+}
+
+export function buildAudienceWebSocketUrl(
+  endpoint: string,
+  sessionId: string,
+  participantToken?: string,
+): string {
+  const trimmed = endpoint.replace(/\/+$/, '');
+  const wsBase = trimmed.replace(/^http:\/\//i, 'ws://').replace(/^https:\/\//i, 'wss://');
+  const baseUrl = `${wsBase}/api/v1/sessions/${encodeURIComponent(sessionId)}/ws`;
+  if (participantToken) {
+    return `${baseUrl}?token=${encodeURIComponent(participantToken)}`;
+  }
+  return baseUrl;
 }
 
 export class AudienceAppController {
@@ -56,6 +90,14 @@ export class AudienceAppController {
   private participantVotesByPollId = new Map<string, string[]>();
   private participantWordSubmissions = new Map<string, Set<string>>();
 
+  // Reactive listeners & WebSocket state
+  private listeners = new Set<(vm: AudienceViewModel) => void>();
+  private ws: WebSocketLike | null = null;
+  private wsConfig: AudienceConfig | null = null;
+  private wsRetryAttempt = 0;
+  private wsRetryTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  private destroyed = false;
+
   constructor(sessionId: string, initialIdentity?: ParticipantIdentity) {
     this.sessionId = sessionId;
     const now = new Date().toISOString();
@@ -68,16 +110,38 @@ export class AudienceAppController {
     };
   }
 
+  // Reactive subscription for UI listeners
+  subscribe(listener: (vm: AudienceViewModel) => void): () => void {
+    this.listeners.add(listener);
+    listener(this.getViewModel());
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private notifyListeners(): void {
+    if (this.destroyed) return;
+    const vm = this.getViewModel();
+    for (const listener of this.listeners) {
+      listener(vm);
+    }
+  }
+
   getParticipant(): ParticipantIdentity {
     return { ...this.participant };
   }
 
   setParticipantDisplayName(name: string): void {
     this.participant.displayName = name.trim();
+    this.notifyListeners();
   }
 
   getMode(): AudienceMode {
     return this.mode;
+  }
+
+  isFollowing(): boolean {
+    return this.mode === 'follow';
   }
 
   setMode(newMode: AudienceMode): void {
@@ -95,9 +159,10 @@ export class AudienceAppController {
         this.soloCurrentSlideId = revealed[0]?.id ?? null;
       }
     }
+    this.notifyListeners();
   }
 
-  // SPEC-002, SPEC-019: Reconnect and synchronize session state
+  // SPEC-002, SPEC-004, SPEC-019: Reconnect and synchronize session state
   syncSessionView(view: AudienceSafeSessionView): void {
     this.connected = true;
     this.slides = [...view.slides].sort((a, b) => a.order - b.order);
@@ -119,10 +184,300 @@ export class AudienceAppController {
       const revealed = this.getRevealedSlidesInOrder();
       this.soloCurrentSlideId = revealed[0]?.id ?? null;
     }
+
+    this.notifyListeners();
   }
 
   setConnectionStatus(connected: boolean): void {
     this.connected = connected;
+    this.notifyListeners();
+  }
+
+  // Real-time WebSocket event handler (SPEC-004)
+  handleRealtimeEvent(event: RealtimeEvent): void {
+    if (!event || typeof event !== 'object') return;
+
+    switch (event.type) {
+      case 'slide.changed': {
+        const payload = (event.payload ?? {}) as {
+          slideId?: string;
+          horizontalIndex?: number;
+          verticalIndex?: number;
+          timestamp?: string;
+          revealedSlideIds?: string[];
+        };
+        if (payload.slideId) {
+          this.speakerCurrentSlideId = payload.slideId;
+          this.revealedSlideIds.add(payload.slideId);
+          if (Array.isArray(payload.revealedSlideIds)) {
+            for (const id of payload.revealedSlideIds) {
+              this.revealedSlideIds.add(id);
+            }
+          }
+          this.notifyListeners();
+        }
+        break;
+      }
+
+      case 'session.state': {
+        const payload = (event.payload ?? {}) as {
+          currentSlideId?: string | null;
+          revealedSlideIds?: string[];
+          pdfDownloadUnlocked?: boolean;
+          session?: {
+            currentSlideId?: string | null;
+            revealedSlideIds?: string[];
+            pdfDownloadUnlocked?: boolean;
+          };
+          slides?: SlideMetadata[];
+        };
+
+        if (payload.session && payload.slides) {
+          this.syncSessionView(payload as unknown as AudienceSafeSessionView);
+          return;
+        }
+
+        if (payload.currentSlideId !== undefined) {
+          this.speakerCurrentSlideId = payload.currentSlideId;
+        }
+        if (Array.isArray(payload.revealedSlideIds)) {
+          for (const id of payload.revealedSlideIds) {
+            this.revealedSlideIds.add(id);
+          }
+        }
+        if (typeof payload.pdfDownloadUnlocked === 'boolean') {
+          this.pdfDownloadUnlocked = payload.pdfDownloadUnlocked;
+        }
+        this.notifyListeners();
+        break;
+      }
+
+      case 'question.submitted':
+      case 'question.updated': {
+        const q = event.payload as AudienceQuestion;
+        if (q?.id) {
+          const idx = this.questions.findIndex((item) => item.id === q.id);
+          if (idx >= 0) {
+            this.questions[idx] = { ...q };
+          } else {
+            this.questions.push({ ...q });
+          }
+          this.notifyListeners();
+        }
+        break;
+      }
+
+      case 'question.upvoted': {
+        const payload = event.payload as { questionId?: string; upvotes?: number };
+        if (payload?.questionId && typeof payload.upvotes === 'number') {
+          const q = this.questions.find((item) => item.id === payload.questionId);
+          if (q) {
+            q.upvotes = payload.upvotes;
+            this.notifyListeners();
+          }
+        }
+        break;
+      }
+
+      case 'reaction.summary': {
+        const payload = event.payload as
+          | { slideId?: string; counts?: ReactionCounts }
+          | Record<string, ReactionCounts>;
+        if (payload && typeof payload === 'object') {
+          const candidate = payload as { slideId?: unknown; counts?: unknown };
+          if (
+            typeof candidate.slideId === 'string' &&
+            candidate.counts &&
+            typeof candidate.counts === 'object'
+          ) {
+            this.reactionsBySlide.set(candidate.slideId, {
+              ...(candidate.counts as ReactionCounts),
+            });
+          } else {
+            for (const [sId, counts] of Object.entries(payload)) {
+              if (counts && typeof counts === 'object') {
+                this.reactionsBySlide.set(sId, { ...(counts as ReactionCounts) });
+              }
+            }
+          }
+          this.notifyListeners();
+        }
+        break;
+      }
+
+      case 'presentation.download.unlocked': {
+        this.pdfDownloadUnlocked = true;
+        this.notifyListeners();
+        break;
+      }
+
+      case 'poll.opened':
+      case 'poll.closed':
+      case 'poll.results': {
+        const poll = event.payload as PollResultsSummary;
+        if (poll?.pollId) {
+          const idx = this.polls.findIndex((p) => p.pollId === poll.pollId);
+          if (idx >= 0) {
+            this.polls[idx] = { ...poll };
+          } else {
+            this.polls.push({ ...poll });
+          }
+          this.notifyListeners();
+        }
+        break;
+      }
+
+      case 'wordcloud.updated': {
+        const wc = event.payload as WordCloudAggregate;
+        if (wc?.promptId) {
+          const idx = this.wordClouds.findIndex((w) => w.promptId === wc.promptId);
+          if (idx >= 0) {
+            this.wordClouds[idx] = { ...wc };
+          } else {
+            this.wordClouds.push({ ...wc });
+          }
+          this.notifyListeners();
+        }
+        break;
+      }
+
+      default:
+        break;
+    }
+  }
+
+  handleMessage(rawMessage: string): void {
+    try {
+      const parsed = JSON.parse(rawMessage) as RealtimeEvent;
+      if (parsed && typeof parsed.type === 'string') {
+        this.handleRealtimeEvent(parsed);
+      }
+    } catch {
+      // Ignore non-JSON WebSocket frame
+    }
+  }
+
+  // HTTP Session State Re-fetch on connect/reconnect
+  async refreshSessionState(endpoint: string, fetchFn?: typeof fetch): Promise<void> {
+    const fetcher = fetchFn ?? (typeof fetch !== 'undefined' ? fetch : undefined);
+    if (!fetcher) return;
+
+    try {
+      const cleanEndpoint = endpoint.replace(/\/+$/, '');
+      const res = await fetcher(
+        `${cleanEndpoint}/api/v1/sessions/${encodeURIComponent(this.sessionId)}`,
+      );
+      if (res.ok) {
+        const view = (await res.json()) as AudienceSafeSessionView;
+        this.syncSessionView(view);
+      }
+    } catch {
+      // Ignore fetch error on background sync
+    }
+  }
+
+  // WebSocket Connection Lifecycle with Auto-Reconnect (SPEC-004, SPEC-019)
+  connectWebSocket(config: AudienceConfig): void {
+    this.wsConfig = config;
+    this.destroyed = false;
+
+    if (this.wsRetryTimeoutId) {
+      clearTimeout(this.wsRetryTimeoutId);
+      this.wsRetryTimeoutId = null;
+    }
+
+    if (this.ws) {
+      try {
+        this.ws.close?.();
+      } catch {
+        // Ignore close error on existing socket
+      }
+      this.ws = null;
+    }
+
+    const url = buildAudienceWebSocketUrl(
+      config.endpoint,
+      this.sessionId,
+      config.participantToken ?? this.participant.token,
+    );
+
+    try {
+      const factory =
+        config.webSocketFactory ??
+        ((targetUrl: string) => new WebSocket(targetUrl) as unknown as WebSocketLike);
+      const socket = factory(url);
+      this.ws = socket;
+
+      socket.onopen = async () => {
+        if (this.destroyed) return;
+        this.connected = true;
+        this.wsRetryAttempt = 0;
+        if (config.endpoint) {
+          await this.refreshSessionState(config.endpoint, config.fetchFn);
+        }
+        this.notifyListeners();
+      };
+
+      socket.onmessage = (event: unknown) => {
+        if (this.destroyed) return;
+        const data = (event as { data?: unknown })?.data;
+        if (typeof data === 'string') {
+          this.handleMessage(data);
+        }
+      };
+
+      socket.onclose = () => {
+        if (this.destroyed) return;
+        this.connected = false;
+        this.notifyListeners();
+        this.scheduleReconnect();
+      };
+
+      socket.onerror = () => {
+        if (this.destroyed) return;
+        this.connected = false;
+        this.notifyListeners();
+      };
+    } catch {
+      this.connected = false;
+      this.notifyListeners();
+      this.scheduleReconnect();
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.destroyed || !this.wsConfig) return;
+    if (this.wsRetryTimeoutId) {
+      clearTimeout(this.wsRetryTimeoutId);
+    }
+    const delay = computeBackoffDelayMs(
+      this.wsRetryAttempt++,
+      this.wsConfig.reconnectBaseMs,
+      this.wsConfig.reconnectMaxMs,
+    );
+    this.wsRetryTimeoutId = setTimeout(() => {
+      if (!this.destroyed && this.wsConfig) {
+        this.connectWebSocket(this.wsConfig);
+      }
+    }, delay);
+  }
+
+  disconnect(): void {
+    this.destroyed = true;
+    if (this.wsRetryTimeoutId) {
+      clearTimeout(this.wsRetryTimeoutId);
+      this.wsRetryTimeoutId = null;
+    }
+    if (this.ws) {
+      try {
+        this.ws.close?.();
+      } catch {
+        // Ignore close error
+      }
+      this.ws = null;
+    }
+    this.connected = false;
+    this.notifyListeners();
   }
 
   // Navigation helpers for Solo mode
@@ -165,6 +520,7 @@ export class AudienceAppController {
     const prevSlide = revealed[currentIndex - 1];
     if (prevSlide) {
       this.soloCurrentSlideId = prevSlide.id;
+      this.notifyListeners();
       return true;
     }
     return false;
@@ -177,6 +533,7 @@ export class AudienceAppController {
     const nextSlide = revealed[currentIndex + 1];
     if (nextSlide) {
       this.soloCurrentSlideId = nextSlide.id;
+      this.notifyListeners();
       return true;
     }
     return false;
@@ -208,6 +565,7 @@ export class AudienceAppController {
     };
 
     this.questions.push(question);
+    this.notifyListeners();
     return question;
   }
 
@@ -230,6 +588,7 @@ export class AudienceAppController {
     }
 
     question.upvotedByParticipantIds = Array.from(voterIds);
+    this.notifyListeners();
     return question;
   }
 
@@ -262,6 +621,7 @@ export class AudienceAppController {
     }
 
     counts[reaction] += 1;
+    this.notifyListeners();
   }
 
   getReactionsForActiveSlide(): ReactionCounts {
@@ -284,6 +644,7 @@ export class AudienceAppController {
       poll.countsByOptionId[optId] = (poll.countsByOptionId[optId] ?? 0) + 1;
     }
     poll.totalResponses += 1;
+    this.notifyListeners();
   }
 
   getActivePollForCurrentSlide(): PollResultsSummary | null {
@@ -316,6 +677,7 @@ export class AudienceAppController {
       wordCloud.terms.push({ term: normalized, count: 1 });
     }
     wordCloud.totalSubmissions += 1;
+    this.notifyListeners();
   }
 
   getActiveWordCloudForCurrentSlide(): WordCloudAggregate | null {
@@ -359,6 +721,12 @@ export class AudienceAppController {
       ? revealedSlides.findIndex((s) => s.id === activeSlide.id) + 1
       : 0;
 
+    const totalPresentationSlides = this.slides.length;
+    const slideNumber = activeSlide ? activeSlide.order + 1 : 0;
+    const positionIndicator = activeSlide
+      ? `Slide ${slideNumber} of ${totalPresentationSlides}`
+      : 'No active slide';
+
     return {
       sessionId: this.sessionId,
       participant: this.getParticipant(),
@@ -366,8 +734,9 @@ export class AudienceAppController {
       connected: this.connected,
       activeSlide,
       activeSlideIndex: activeIndex,
+      positionIndicator,
       totalRevealedSlides: revealedSlides.length,
-      totalPresentationSlides: this.slides.length,
+      totalPresentationSlides,
       canNavigateSoloPrev: this.canNavigateSoloPrev(),
       canNavigateSoloNext: this.canNavigateSoloNext(),
       containsSlideBodyContent: false, // SPEC-004: Invariant
@@ -502,7 +871,15 @@ export function renderAudienceHtml(vm: AudienceViewModel): string {
       <main>
         ${modeControls}
         <section class="card current-slide-info" aria-label="Slide Information">
+          <div class="mode-status-indicator" role="status" aria-live="polite">
+            ${
+              isFollow
+                ? '<span class="indicator-following">● Following Speaker</span>'
+                : `<span class="indicator-solo">Solo Browsing (Slide ${vm.activeSlideIndex} of ${vm.totalRevealedSlides})</span>`
+            }
+          </div>
           <h3 class="slide-title">${slideTitle}</h3>
+          <p class="slide-position-indicator" aria-label="Slide position">${vm.positionIndicator}</p>
           <p class="slide-number-indicator">${slideCountLabel}</p>
         </section>
         <section class="card reactions-container" aria-label="Emoji Reactions">

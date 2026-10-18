@@ -215,3 +215,14 @@ export interface AudienceSafeSessionView {
   activeWordClouds: WordCloudAggregate[];
   reactionSummary: Record<string, ReactionCounts>;
 }
+
+export interface WebSocketLike {
+  readonly readyState?: number;
+  send: (data: string) => void;
+  close?: (code?: number, reason?: string) => void;
+  addEventListener?: (type: string, listener: (event: unknown) => void) => void;
+  onopen?: ((event?: unknown) => void) | null;
+  onmessage?: ((event: { data: unknown }) => void) | ((event: unknown) => void) | null;
+  onclose?: ((event?: unknown) => void) | null;
+  onerror?: ((event?: unknown) => void) | null;
+}

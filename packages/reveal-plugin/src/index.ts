@@ -1,4 +1,6 @@
-import type { AudienceQuestion } from '@agora/contracts';
+import type { AudienceQuestion, WebSocketLike } from '@agora/contracts';
+
+export type { WebSocketLike };
 
 export interface RevealAudienceConfig {
   sessionId: string;
@@ -8,17 +10,6 @@ export interface RevealAudienceConfig {
   reconnectMaxMs?: number;
   fetchFn?: typeof fetch;
   webSocketFactory?: (url: string) => WebSocketLike;
-}
-
-export interface WebSocketLike {
-  readonly readyState?: number;
-  send: (data: string) => void;
-  close?: (code?: number, reason?: string) => void;
-  addEventListener?: (type: string, listener: (event: unknown) => void) => void;
-  onopen?: ((event: unknown) => void) | null;
-  onmessage?: ((event: unknown) => void) | null;
-  onclose?: ((event: unknown) => void) | null;
-  onerror?: ((event: unknown) => void) | null;
 }
 
 export interface SlideChangedDispatchPayload {

@@ -113,26 +113,26 @@
       "user_visible_behavior": "Default audience mode locks client view to the speaker's active slide in real time, displaying slide title, slide number, question submission button, reaction emojis, and gated download controls without rendering raw slide DOM.",
       "status": "passing",
       "verification": [
-        "vitest run apps/audience/tests/follow-mode.test.ts",
-        "vitest run packages/domain/tests/audience-mode.test.ts"
+        "vitest run apps/audience/src/__tests__/audience.test.ts",
+        "vitest run tests/integration/worker-api.test.ts"
       ],
       "evidence": [
         {
           "type": "unit_test",
-          "target": "packages/domain/tests/audience-mode.test.ts",
-          "timestamp": "2026-10-18T20:44:22Z",
+          "target": "apps/audience/src/__tests__/audience.test.ts",
+          "timestamp": "2026-10-19T01:20:48Z",
           "result": "passed",
-          "assertions": 8
+          "assertions": 20
         },
         {
-          "type": "component_test",
-          "target": "apps/audience/tests/follow-mode.test.ts",
-          "timestamp": "2026-10-18T20:44:25Z",
+          "type": "integration_test",
+          "target": "tests/integration/worker-api.test.ts",
+          "timestamp": "2026-10-19T01:20:48Z",
           "result": "passed",
           "assertions": 7
         }
       ],
-      "notes": "Audience never sees slide DOM; reconnection refreshes speaker position."
+      "notes": "Includes default follow mode, WebSocket slide.changed real-time sync, positionIndicator formatting, strict omission of slide body/fragment DOM, reactive subscriber updates, contextual Ask Question/Emoji/Download controls, and auto-reconnect backoff."
     },
     {
       "id": "SPEC-005",
