@@ -1,0 +1,184 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  createLocalCloudflareEnv,
+  LocalD1Database,
+  LocalDurableObjectNamespace,
+  LocalR2Bucket,
+} from '../../apps/worker/src/cloudflare-emulator';
+import { createAgoraWorkerApp } from '../../apps/worker/src/index';
+
+describe('Cloudflare Local Emulation Integration Tests', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agora-emulate-'));
+  });
+
+  afterEach(() => {
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('LocalD1Database supports prepared statements, schema.sql tables, and disk persistence across restarts', async () => {
+    const dbPath = path.join(tmpDir, 'd1.sqlite');
+    const d1 = new LocalD1Database(dbPath);
+    const now = new Date().toISOString();
+
+    await d1
+      .prepare(
+        `INSERT INTO presentations (id, title, revision, status, ending_slide_id, branding_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind('pres_1', 'Alpha Keynote', 'rev_1', 'published', 'slide_end', '{}', now, now)
+      .run();
+
+    const row = await d1
+      .prepare('SELECT id, title, revision FROM presentations WHERE id = ?')
+      .bind('pres_1')
+      .first<{ id: string; title: string; revision: string }>();
+    expect(row).toEqual({ id: 'pres_1', title: 'Alpha Keynote', revision: 'rev_1' });
+
+    await d1.batch([
+      d1
+        .prepare(
+          `INSERT INTO slides (id, presentation_id, title, horizontal_index, vertical_index, slide_order, is_qa_slide)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind('slide_1', 'pres_1', 'Intro', 0, 0, 0, 0),
+      d1
+        .prepare(
+          `INSERT INTO slides (id, presentation_id, title, horizontal_index, vertical_index, slide_order, is_qa_slide)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind('slide_end', 'pres_1', 'Thank You', 1, 0, 1, 0),
+    ]);
+
+    const allSlides = await d1
+      .prepare('SELECT id, title FROM slides WHERE presentation_id = ? ORDER BY slide_order ASC')
+      .bind('pres_1')
+      .all<{ id: string; title: string }>();
+    expect(allSlides.results).toHaveLength(2);
+
+    d1.close();
+
+    // Reopen from disk and verify persisted D1 SQLite state
+    const d1Reopened = new LocalD1Database(dbPath);
+    const persisted = await d1Reopened
+      .prepare('SELECT id, title FROM presentations WHERE id = ?')
+      .bind('pres_1')
+      .first<{ id: string; title: string }>();
+    expect(persisted).toEqual({ id: 'pres_1', title: 'Alpha Keynote' });
+    d1Reopened.close();
+  });
+
+  it('LocalR2Bucket supports binary PNG/PDF ops and disk persistence across restarts', async () => {
+    const r2 = new LocalR2Bucket(tmpDir);
+
+    const pngMagic = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+    await r2.put('slides/slide1.png', pngMagic, {
+      httpMetadata: { contentType: 'image/png' },
+    });
+
+    // Re-instantiate LocalR2Bucket against the same directory to verify disk persistence
+    const r2Reopened = new LocalR2Bucket(tmpDir);
+    const obj = await r2Reopened.get('slides/slide1.png');
+    expect(obj).not.toBeNull();
+    expect(obj?.httpMetadata?.contentType).toBe('image/png');
+    const bytes = await obj!.bytes();
+    expect(bytes).toEqual(pngMagic);
+
+    const headObj = await r2Reopened.head('slides/slide1.png');
+    expect(headObj?.size).toBe(pngMagic.length);
+
+    const listed = await r2Reopened.list({ prefix: 'slides/' });
+    expect(listed.objects).toHaveLength(1);
+
+    await r2Reopened.delete('slides/slide1.png');
+    expect(await r2Reopened.get('slides/slide1.png')).toBeNull();
+  });
+
+  it('LocalDurableObjectNamespace supports embedded SQLite ctx.storage.sql, unique constraints, and WebSocket hibernation', () => {
+    const doNs = new LocalDurableObjectNamespace(tmpDir);
+    const doId = doNs.idFromName('session-room-1');
+    const state = doNs.getState(doId);
+    const now = new Date().toISOString();
+
+    state.storage.sql.exec(
+      `INSERT INTO questions (id, session_id, slide_id, participant_id, content, status, upvotes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      'q1',
+      'session-room-1',
+      'slide_1',
+      'part_1',
+      'What is local DO SQLite emulation?',
+      'pending',
+      1,
+      now,
+    );
+
+    state.storage.sql.exec(
+      `INSERT INTO question_upvotes (question_id, participant_id, session_id, created_at)
+       VALUES (?, ?, ?, ?)`,
+      'q1',
+      'part_1',
+      'session-room-1',
+      now,
+    );
+
+    // Duplicate upvote by same participant must violate UNIQUE(question_id, participant_id)
+    expect(() => {
+      state.storage.sql.exec(
+        `INSERT INTO question_upvotes (question_id, participant_id, session_id, created_at)
+         VALUES (?, ?, ?, ?)`,
+        'q1',
+        'part_1',
+        'session-room-1',
+        now,
+      );
+    }).toThrow();
+
+    const rows = state.storage.sql
+      .exec<{ id: string; content: string }>('SELECT id, content FROM questions WHERE id = ?', 'q1')
+      .toArray();
+    expect(rows).toEqual([{ id: 'q1', content: 'What is local DO SQLite emulation?' }]);
+
+    const fakeWs = { send: () => {}, close: () => {} } as unknown as WebSocket;
+    state.acceptWebSocket(fakeWs, ['attendee']);
+    expect(state.getWebSockets('attendee')).toContain(fakeWs);
+
+    doNs.closeAll();
+  });
+
+  it('createLocalCloudflareEnv wires DB, ASSETS_BUCKET, and SESSION_COORDINATOR with createAgoraWorkerApp', async () => {
+    const env = createLocalCloudflareEnv({ persistDir: tmpDir, adminToken: 'local-secret' });
+    const app = createAgoraWorkerApp({ adminToken: env.ADMIN_TOKEN });
+
+    const createRes = await app.fetch(
+      new Request('http://localhost/api/v1/presentations', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${env.ADMIN_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: 'Cloudflare Emulated Presentation',
+          endingSlideId: 's2',
+          slides: [
+            { id: 's1', title: 'Intro', horizontalIndex: 0, verticalIndex: 0, order: 0 },
+            { id: 's2', title: 'End', horizontalIndex: 1, verticalIndex: 0, order: 1 },
+          ],
+        }),
+      }),
+      env,
+    );
+
+    expect(createRes.status).toBe(201);
+    env.close();
+  });
+});

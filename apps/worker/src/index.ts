@@ -20,6 +20,8 @@ import {
   type WordCloudPrompt,
 } from '@agora/contracts';
 
+export * from './cloudflare-emulator';
+
 export interface WorkerEnv {
   ADMIN_TOKEN?: string;
   ENVIRONMENT?: string;

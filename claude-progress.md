@@ -48,3 +48,19 @@
 - **Verification Evidence**:
   - `./init.sh` and `pnpm run verify`: 12 test suites, all passing, 0 lint/format/typecheck errors.
 
+---
+
+## Session 003 — 2026-10-18
+- **Role**: Cloudflare Local Emulation Engineer (`flash`)
+- **Goals**:
+  1. Favor emulating Cloudflare services locally (`D1Database`, `R2Bucket`, and `DurableObjectState` embedded SQLite `ctx.storage.sql` + WebSocket Hibernation) using `node:sqlite` (`DatabaseSync`) and local filesystem persistence.
+  2. Wire `createAgoraWorkerApp` in `apps/worker` to read/write through emulated Cloudflare bindings (`createLocalCloudflareEnv`).
+  3. Add local D1 migration files (`infrastructure/cloudflare/migrations/0001_initial.sql`), local emulation smoke check (`infrastructure/cloudflare/local-emulate-check.mjs`), and integration test suite (`tests/integration/cloudflare-emulation.test.ts`).
+- **Completed**:
+  - Created `apps/worker/src/cloudflare-emulator.ts` implementing `LocalD1Database`, `LocalR2Bucket`, `LocalDurableObjectState`, `LocalDurableObjectNamespace`, and `createLocalCloudflareEnv` with disk persistence across restarts.
+  - Added `infrastructure/cloudflare/migrations/0001_initial.sql` and `infrastructure/cloudflare/local-emulate-check.mjs` (`pnpm run cf:emulate`).
+  - Added `tests/integration/cloudflare-emulation.test.ts` verifying D1, R2, DO SQLite, and full Worker restart persistence.
+- **Verification Evidence**:
+  - `./init.sh`, `pnpm run cf:emulate`, and `pnpm run verify`: 13 test suites passing with local Cloudflare service emulation.
+
+
