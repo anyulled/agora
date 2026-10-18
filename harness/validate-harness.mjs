@@ -25,6 +25,7 @@ function reportSuccess(msg) {
 // 1. Verify the 5 Core Harness Subsystems (Practice 2)
 const requiredSubsystemFiles = [
   // Subsystem 1: Router & Operating Loop
+  'README.md',
   'AGENTS.md',
   'CLAUDE.md',
   // Subsystem 2: System of Record
