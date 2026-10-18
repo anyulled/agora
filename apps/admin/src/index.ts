@@ -550,7 +550,7 @@ export class AdminAppController {
   // SPEC-002: Live session starter
   startLiveSession(
     presentationId: string,
-    options?: { audienceBaseUrl?: string },
+    options?: { audienceBaseUrl?: string; status?: 'scheduled' | 'live' },
   ): PresentationSession {
     const presentation = this.presentations.get(presentationId);
     if (!presentation) {
@@ -559,20 +559,21 @@ export class AdminAppController {
 
     const sessionId = this.generateId('sess');
     const baseUrl = options?.audienceBaseUrl || 'https://agora.live';
-    const firstSlide = presentation.slides?.[0];
+    const status = options?.status || 'live';
+    const firstSlide = status === 'live' ? presentation.slides?.[0] : undefined;
 
     const session: PresentationSession = {
       id: sessionId,
       presentationId,
       presentationRevision: presentation.revision,
-      status: 'live',
+      status,
       currentSlideId: firstSlide?.id ?? null,
       revealedSlideIds: firstSlide ? [firstSlide.id] : [],
       pdfDownloadUnlocked: false,
       audienceUrl: `${baseUrl}/audience/${sessionId}`,
       qrCodeDataUrl: `data:image/svg+xml;utf8,<svg viewBox="0 0 100 100"><text y="50">QR_${sessionId}</text></svg>`,
       connectedParticipants: 0,
-      startedAt: new Date().toISOString(),
+      startedAt: status === 'live' ? new Date().toISOString() : undefined,
     };
 
     this.activeSessions.set(presentationId, session);
@@ -609,8 +610,15 @@ export function renderAdminDashboardHtml(state: AdminDashboardViewModel): string
     .map((p) => {
       const activeSession = state.activeSessionsByPresentationId[p.id];
       const sessionBadge = activeSession
-        ? `<span class="badge badge-live">LIVE (${activeSession.id})</span>`
+        ? `<span class="badge badge-live">${activeSession.status.toUpperCase()} (${activeSession.id})</span>`
         : `<span class="badge badge-draft">${p.status}</span>`;
+
+      const sessionJoinHtml = activeSession
+        ? `<div class="session-join-info" data-session-id="${activeSession.id}">
+            <p class="session-join-link">Join URL: <a href="${activeSession.audienceUrl ?? ''}" class="session-join-url">${activeSession.audienceUrl ?? ''}</a></p>
+            ${activeSession.qrCodeDataUrl ? `<img src="${activeSession.qrCodeDataUrl}" alt="Join QR code for ${p.title}" class="session-qr-code" />` : ''}
+          </div>`
+        : '';
 
       return `
       <article class="card presentation-card" data-presentation-id="${p.id}">
@@ -619,6 +627,7 @@ export function renderAdminDashboardHtml(state: AdminDashboardViewModel): string
           ${sessionBadge}
         </div>
         <p class="revision-label">Revision: <strong>${p.revision}</strong> | Slides: ${p.slides?.length ?? 0}</p>
+        ${sessionJoinHtml}
         <div class="button-group">
           <button class="btn-primary" data-action="start-session" data-id="${p.id}">Start Live Session</button>
           <button class="btn-secondary" data-action="generate-images" data-id="${p.id}">Generate Images</button>

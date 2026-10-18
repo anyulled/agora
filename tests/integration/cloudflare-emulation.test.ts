@@ -307,4 +307,206 @@ describe('Cloudflare Local Emulation Integration Tests', () => {
 
     env.close();
   });
+
+  it('SPEC-002: persists live session lifecycle (scheduled -> live -> completed), participants, and WebSocket reconnect restoration in Durable Object SQLite', async () => {
+    const env = createLocalCloudflareEnv({ persistDir: tmpDir, adminToken: 'local-secret' });
+    const app = createAgoraWorkerApp({ adminToken: env.ADMIN_TOKEN });
+    const adminHeaders = {
+      Authorization: `Bearer ${env.ADMIN_TOKEN}`,
+      'Content-Type': 'application/json',
+    };
+
+    // 1. Create presentation in D1
+    const presRes = await app.fetch(
+      new Request('http://localhost/api/v1/presentations', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'Live DO Session Deck',
+          endingSlideId: 's2',
+          slides: [
+            {
+              id: 's1',
+              presentationId: 'p',
+              title: 'Intro',
+              horizontalIndex: 0,
+              verticalIndex: 0,
+              order: 0,
+            },
+            {
+              id: 's2',
+              presentationId: 'p',
+              title: 'Ending',
+              horizontalIndex: 1,
+              verticalIndex: 0,
+              order: 1,
+            },
+          ],
+        }),
+      }),
+      env,
+    );
+    const pres = (await presRes.json()) as { id: string };
+
+    // 2. Create session in 'scheduled' state
+    const schedRes = await app.fetch(
+      new Request(`http://localhost/api/v1/presentations/${pres.id}/sessions`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({ status: 'scheduled' }),
+      }),
+      env,
+    );
+    expect(schedRes.status).toBe(201);
+    const scheduled = (await schedRes.json()) as {
+      id: string;
+      status: string;
+      presenterToken: string;
+      currentSlideId: string | null;
+      audienceUrl: string;
+      qrCodeDataUrl: string;
+    };
+    expect(scheduled.status).toBe('scheduled');
+    expect(scheduled.currentSlideId).toBeNull();
+    expect(scheduled.audienceUrl).toContain(scheduled.id);
+    expect(scheduled.qrCodeDataUrl).toContain('data:image/svg+xml');
+
+    // 3. Transition scheduled -> live via POST /api/v1/sessions/:id/start
+    const startRes = await app.fetch(
+      new Request(`http://localhost/api/v1/sessions/${scheduled.id}/start`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${scheduled.presenterToken}` },
+      }),
+      env,
+    );
+    expect(startRes.status).toBe(200);
+    const liveSession = (await startRes.json()) as {
+      status: string;
+      currentSlideId: string;
+      revealedSlideIds: string[];
+    };
+    expect(liveSession.status).toBe('live');
+    expect(liveSession.currentSlideId).toBe('s1');
+    expect(liveSession.revealedSlideIds).toEqual(['s1']);
+
+    // 4. Attendee joins and Presenter navigates to ending slide s2
+    const joinRes = await app.fetch(
+      new Request(`http://localhost/api/v1/sessions/${scheduled.id}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Dana' }),
+      }),
+      env,
+    );
+    expect(joinRes.status).toBe(201);
+    const participant = (await joinRes.json()) as { id: string; token: string };
+
+    const navRes = await app.fetch(
+      new Request(`http://localhost/api/v1/sessions/${scheduled.id}/slide`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${scheduled.presenterToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ slideId: 's2' }),
+      }),
+      env,
+    );
+    expect(navRes.status).toBe(200);
+
+    // 5. Simulate Worker restart with fresh in-memory store reading from persisted DO SQLite
+    const restartedApp = createAgoraWorkerApp({ adminToken: env.ADMIN_TOKEN });
+    const viewRes = await restartedApp.fetch(
+      new Request(`http://localhost/api/v1/sessions/${scheduled.id}`),
+      env,
+    );
+    expect(viewRes.status).toBe(200);
+    const hydratedView = (await viewRes.json()) as {
+      session: {
+        status: string;
+        currentSlideId: string;
+        revealedSlideIds: string[];
+        pdfDownloadUnlocked: boolean;
+        connectedParticipants: number;
+      };
+    };
+    expect(hydratedView.session.status).toBe('live');
+    expect(hydratedView.session.currentSlideId).toBe('s2');
+    expect(hydratedView.session.revealedSlideIds).toEqual(['s1', 's2']);
+    expect(hydratedView.session.pdfDownloadUnlocked).toBe(true);
+    expect(hydratedView.session.connectedParticipants).toBe(1);
+
+    // 6. WebSocket reconnection immediately restores authoritative session.state snapshot
+    const sentMessages: string[] = [];
+    const mockWs = {
+      readyState: WebSocket.OPEN,
+      send: (msg: string) => sentMessages.push(msg),
+      close: () => {},
+    } as unknown as WebSocket;
+    restartedApp.getCoordinator(scheduled.id).handleConnection(mockWs, 'http://localhost');
+    expect(sentMessages).toHaveLength(1);
+    const restoredEvent = JSON.parse(sentMessages[0]!) as {
+      type: string;
+      payload: { currentSlideId: string; revealedSlideIds: string[]; pdfDownloadUnlocked: boolean };
+    };
+    expect(restoredEvent.type).toBe('session.state');
+    expect(restoredEvent.payload.currentSlideId).toBe('s2');
+    expect(restoredEvent.payload.revealedSlideIds).toEqual(['s1', 's2']);
+    expect(restoredEvent.payload.pdfDownloadUnlocked).toBe(true);
+
+    // 7. Hydrated participant token still works after restart, and presenter can complete session
+    const qRes = await restartedApp.fetch(
+      new Request(`http://localhost/api/v1/sessions/${scheduled.id}/questions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${participant.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ slideId: 's2', content: 'Persisted participant question?' }),
+      }),
+      env,
+    );
+    expect(qRes.status).toBe(201);
+
+    const completeRes = await restartedApp.fetch(
+      new Request(`http://localhost/api/v1/sessions/${scheduled.id}/complete`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${scheduled.presenterToken}` },
+      }),
+      env,
+    );
+    expect(completeRes.status).toBe(200);
+    const completed = (await completeRes.json()) as { status: string; completedAt: string };
+    expect(completed.status).toBe('completed');
+    expect(completed.completedAt).toBeDefined();
+
+    // Joining a completed session is rejected
+    const lateJoin = await restartedApp.fetch(
+      new Request(`http://localhost/api/v1/sessions/${scheduled.id}/join`, {
+        method: 'POST',
+      }),
+      env,
+    );
+    expect(lateJoin.status).toBe(400);
+
+    // 8. Verify OpenAPI 3.1.0 specification and interactive docs endpoints
+    const openApiRes = await restartedApp.fetch(
+      new Request('http://localhost/api/v1/openapi.json'),
+      env,
+    );
+    expect(openApiRes.status).toBe(200);
+    const openApiDoc = (await openApiRes.json()) as {
+      openapi: string;
+      paths: Record<string, unknown>;
+    };
+    expect(openApiDoc.openapi).toBe('3.1.0');
+    expect(openApiDoc.paths['/api/v1/presentations/{id}/sessions']).toBeDefined();
+    expect(openApiDoc.paths['/api/v1/sessions/{id}/start']).toBeDefined();
+
+    const docsRes = await restartedApp.fetch(new Request('http://localhost/api/v1/docs'), env);
+    expect(docsRes.status).toBe(200);
+    expect(await docsRes.text()).toContain('/api/v1/openapi.json');
+
+    env.close();
+  });
 });

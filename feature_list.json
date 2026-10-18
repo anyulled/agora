@@ -52,26 +52,29 @@
       "user_visible_behavior": "Admin/presenter starts a session, generating a unique audience join URL and QR code. Attendees join anonymously and receive a session-scoped pseudonymous participant token. Session states include scheduled, live, and completed. Reconnection restores session state.",
       "status": "passing",
       "verification": [
-        "vitest run packages/domain/tests/session.test.ts",
-        "vitest run apps/worker/tests/session-lifecycle.test.ts"
+        "vitest run packages/domain/src/__tests__/domain.test.ts",
+        "vitest run apps/admin/src/__tests__/admin.test.ts",
+        "vitest run apps/presenter/src/__tests__/presenter.test.ts",
+        "vitest run tests/integration/cloudflare-emulation.test.ts",
+        "vitest run tests/integration/worker-api.test.ts"
       ],
       "evidence": [
         {
           "type": "unit_test",
-          "target": "packages/domain/tests/session.test.ts",
-          "timestamp": "2026-10-18T20:44:10Z",
+          "target": "packages/domain/src/__tests__/domain.test.ts",
+          "timestamp": "2026-10-19T00:40:00Z",
           "result": "passed",
-          "assertions": 12
+          "assertions": 32
         },
         {
           "type": "integration_test",
-          "target": "apps/worker/tests/session-lifecycle.test.ts",
-          "timestamp": "2026-10-18T20:44:15Z",
+          "target": "tests/integration/cloudflare-emulation.test.ts",
+          "timestamp": "2026-10-19T00:40:00Z",
           "result": "passed",
-          "assertions": 9
+          "assertions": 35
         }
       ],
-      "notes": "Visiting ending slide unlocks PDF but does not set status to completed."
+      "notes": "Includes scheduled -> live -> completed lifecycle, Durable Object SQLite persistence (session_state, participants, _do_kv), WebSocket reconnect state restoration, Admin/Presenter QR code & join URL rendering, and OpenAPI 3.1.0 endpoint documentation."
     },
     {
       "id": "SPEC-003",

@@ -75,6 +75,8 @@ describe('PresenterAppController (SPEC-008, SPEC-011, SPEC-012, SPEC-023)', () =
     currentSlideId: 'slide_0',
     revealedSlideIds: ['slide_0'],
     pdfDownloadUnlocked: false,
+    audienceUrl: 'https://agora.live/sessions/sess_1',
+    qrCodeDataUrl: 'data:image/svg+xml;utf8,<svg>QR_sess_1</svg>',
     connectedParticipants: 12,
   };
 
@@ -320,6 +322,8 @@ describe('PresenterAppController (SPEC-008, SPEC-011, SPEC-012, SPEC-023)', () =
       expect(state.hasAdminControls).toBe(false);
 
       const html = renderPresenterViewHtml(state);
+      expect(html).toContain('https://agora.live/sessions/sess_1');
+      expect(html).toContain('presenter-qr-code');
       expect(html).not.toContain('Generate All Slide Images');
       expect(html).not.toContain('Generate Images');
       expect(html).not.toContain('New Presentation');

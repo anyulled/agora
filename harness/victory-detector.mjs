@@ -68,6 +68,8 @@ const layer1Files = [
   'harness/quality-document.md',
   'harness/verify-duplication.mjs',
   'harness/verify-mermaid.mjs',
+  'harness/verify-openapi.mjs',
+  'docs/openapi.json',
 ];
 
 let layer1Missing = 0;

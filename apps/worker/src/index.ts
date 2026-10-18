@@ -21,17 +21,28 @@ import {
   type WordCloudAggregate,
   type WordCloudPrompt,
 } from '@agora/contracts';
-import { bumpRevision, computePresentationRevisionHash } from '@agora/domain';
-import type { LocalD1Database, LocalR2Bucket } from './cloudflare-emulator';
+import {
+  bumpRevision,
+  computePresentationRevisionHash,
+  startScheduledSession,
+} from '@agora/domain';
+import type {
+  LocalD1Database,
+  LocalDurableObjectNamespace,
+  LocalDurableObjectState,
+  LocalR2Bucket,
+} from './cloudflare-emulator';
+import { AGORA_OPENAPI_SPEC, renderOpenApiDocsHtml } from './openapi';
 
 export * from './cloudflare-emulator';
+export * from './openapi';
 
 export interface WorkerEnv {
   ADMIN_TOKEN?: string;
   ENVIRONMENT?: string;
   DB?: LocalD1Database | unknown;
   ASSETS_BUCKET?: LocalR2Bucket | unknown;
-  SESSION_COORDINATOR?: unknown;
+  SESSION_COORDINATOR?: LocalDurableObjectNamespace | unknown;
 }
 
 export interface AgoraWorkerAppOptions {
@@ -105,6 +116,26 @@ export class SessionCoordinatorDO {
     }
 
     this.sockets.add(ws);
+
+    // SPEC-002: Restore authoritative session state snapshot upon WebSocket connection/reconnection
+    const session = this.store.sessions.get(this.sessionId);
+    if (session) {
+      const snapshotEvent: RealtimeEvent<PresentationSession> = {
+        id: `evt-restore-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        type: 'session.state',
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        payload: session,
+      };
+      try {
+        if (ws.readyState === undefined || ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(snapshotEvent));
+        }
+      } catch {
+        // Ignore send errors on mock sockets
+      }
+    }
+
     return true;
   }
 
@@ -303,6 +334,120 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
   function asR2(env?: WorkerEnv): LocalR2Bucket | null {
     const r2 = env?.ASSETS_BUCKET as LocalR2Bucket | undefined;
     return r2 && typeof r2.put === 'function' ? r2 : null;
+  }
+
+  function asDO(env: WorkerEnv | undefined, sessionId: string): LocalDurableObjectState | null {
+    const ns = env?.SESSION_COORDINATOR as LocalDurableObjectNamespace | undefined;
+    if (!ns || typeof ns.getState !== 'function' || typeof ns.idFromName !== 'function') {
+      return null;
+    }
+    return ns.getState(ns.idFromName(sessionId));
+  }
+
+  async function persistSessionToDO(
+    env: WorkerEnv | undefined,
+    session: PresentationSession,
+    presenterToken?: string,
+  ): Promise<void> {
+    const doState = asDO(env, session.id);
+    if (!doState) return;
+
+    doState.storage.sql.exec(
+      `INSERT OR REPLACE INTO session_state
+       (session_id, presentation_id, presentation_revision, status, current_slide_id, revealed_slide_ids_json, pdf_download_unlocked, audience_url, qr_code_data_url, started_at, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      session.id,
+      session.presentationId,
+      session.presentationRevision,
+      session.status,
+      session.currentSlideId ?? null,
+      JSON.stringify(session.revealedSlideIds),
+      session.pdfDownloadUnlocked ? 1 : 0,
+      session.audienceUrl ?? null,
+      session.qrCodeDataUrl ?? null,
+      session.startedAt ?? new Date().toISOString(),
+      session.completedAt ?? null,
+    );
+
+    if (presenterToken) {
+      await doState.storage.put('presenterToken', presenterToken);
+    }
+  }
+
+  function persistParticipantToDO(
+    env: WorkerEnv | undefined,
+    participant: ParticipantIdentity,
+  ): void {
+    const doState = asDO(env, participant.sessionId);
+    if (!doState) return;
+
+    doState.storage.sql.exec(
+      `INSERT OR REPLACE INTO participants (id, session_id, token, display_name, joined_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      participant.id,
+      participant.sessionId,
+      participant.token,
+      participant.displayName ?? null,
+      participant.joinedAt,
+    );
+  }
+
+  async function hydrateSessionFromDO(
+    env: WorkerEnv | undefined,
+    sessionId: string,
+  ): Promise<PresentationSession | null> {
+    const inMem = store.sessions.get(sessionId);
+    if (inMem) return inMem;
+
+    const doState = asDO(env, sessionId);
+    if (!doState) return null;
+
+    const rows = doState.storage.sql
+      .exec<Record<string, unknown>>('SELECT * FROM session_state WHERE session_id = ?', sessionId)
+      .toArray();
+    const row = rows[0];
+    if (!row) return null;
+
+    const pRows = doState.storage.sql
+      .exec<Record<string, unknown>>('SELECT * FROM participants WHERE session_id = ?', sessionId)
+      .toArray();
+
+    for (const p of pRows) {
+      const part: ParticipantIdentity = {
+        id: String(p.id),
+        sessionId: String(p.session_id),
+        token: String(p.token),
+        displayName: p.display_name ? String(p.display_name) : undefined,
+        joinedAt: String(p.joined_at),
+      };
+      store.participants.set(part.id, part);
+      store.participantTokens.set(part.token, part.id);
+    }
+
+    const savedPresenterToken = await doState.storage.get<string>('presenterToken');
+    if (savedPresenterToken) {
+      store.presenterTokens.set(sessionId, savedPresenterToken);
+    }
+
+    const status = (row.status as PresentationSession['status']) || 'live';
+    const session: PresentationSession = {
+      id: String(row.session_id),
+      presentationId: String(row.presentation_id),
+      presentationRevision: String(row.presentation_revision),
+      status,
+      currentSlideId: row.current_slide_id ? String(row.current_slide_id) : null,
+      revealedSlideIds: JSON.parse(String(row.revealed_slide_ids_json || '[]')) as string[],
+      pdfDownloadUnlocked: Boolean(row.pdf_download_unlocked),
+      audienceUrl: row.audience_url ? String(row.audience_url) : undefined,
+      qrCodeDataUrl: row.qr_code_data_url ? String(row.qr_code_data_url) : undefined,
+      connectedParticipants: pRows.length,
+      startedAt: status === 'scheduled' ? undefined : String(row.started_at),
+      completedAt: row.completed_at ? String(row.completed_at) : undefined,
+    };
+
+    store.sessions.set(sessionId, session);
+    await hydratePresentationFromD1(env, session.presentationId);
+    return session;
   }
 
   function validatePresentationPayload(
@@ -532,6 +677,17 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
           'Access-Control-Allow-Headers':
             'Content-Type, Authorization, x-admin-token, x-presenter-token, x-participant-token, x-confirm-destroy',
         },
+      });
+    }
+
+    // OpenAPI 3.1.0 Specification & Interactive Documentation
+    if (method === 'GET' && path === '/api/v1/openapi.json') {
+      return jsonResponse(AGORA_OPENAPI_SPEC);
+    }
+    if (method === 'GET' && path === '/api/v1/docs') {
+      return new Response(renderOpenApiDocsHtml(), {
+        status: 200,
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
       });
     }
 
@@ -896,10 +1052,15 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         return errorResponse('Presentation not found', 404);
       }
 
-      const sessionId = `session-${Date.now()}`;
+      const body = (await request.json().catch(() => ({}))) as {
+        status?: 'scheduled' | 'live';
+      };
+      const initialStatus = body.status === 'scheduled' ? 'scheduled' : 'live';
+
+      const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const presenterToken = `tok-pres-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const slides = store.slides.get(presentationId) || [];
-      const firstSlideId = slides[0]?.id || null;
+      const firstSlideId = initialStatus === 'live' ? slides[0]?.id || null : null;
 
       const audienceUrl = `${url.origin}/sessions/${sessionId}`;
       const qrCodeDataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(
@@ -910,14 +1071,14 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         id: sessionId,
         presentationId,
         presentationRevision: presentation.revision,
-        status: 'live',
+        status: initialStatus,
         currentSlideId: firstSlideId,
         revealedSlideIds: firstSlideId ? [firstSlideId] : [],
         pdfDownloadUnlocked: false,
         audienceUrl,
         qrCodeDataUrl,
         connectedParticipants: 0,
-        startedAt: new Date().toISOString(),
+        startedAt: initialStatus === 'live' ? new Date().toISOString() : undefined,
       };
 
       store.sessions.set(sessionId, session);
@@ -927,16 +1088,46 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       store.polls.set(sessionId, []);
       store.wordClouds.set(sessionId, []);
 
+      await persistSessionToDO(env, session, presenterToken);
+      broadcastRealtimeEvent(sessionId, 'session.state', session);
+
       return jsonResponse({ ...session, presenterToken }, 201);
+    }
+
+    // 7b. POST /api/v1/sessions/:id/start (Transition scheduled -> live, SPEC-002)
+    const startMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)\/start$/);
+    if (method === 'POST' && startMatch) {
+      const sessionId = startMatch[1]!;
+      const session = await hydrateSessionFromDO(env, sessionId);
+      if (!session) {
+        return errorResponse('Session not found', 404);
+      }
+      if (!authorizePresenter(request, sessionId)) {
+        return errorResponse('Unauthorized: Presenter authentication required', 403);
+      }
+      if (session.status === 'completed') {
+        return errorResponse('Cannot start a completed session', 400);
+      }
+
+      const slides = store.slides.get(session.presentationId) || [];
+      const started = startScheduledSession(session, slides, 'presenter');
+      store.sessions.set(sessionId, started);
+      await persistSessionToDO(env, started);
+      broadcastRealtimeEvent(sessionId, 'session.state', started);
+
+      return jsonResponse(started);
     }
 
     // 8. POST /api/v1/sessions/:id/join (Anonymous attendee join)
     const joinMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)\/join$/);
     if (method === 'POST' && joinMatch) {
       const sessionId = joinMatch[1]!;
-      const session = store.sessions.get(sessionId);
+      const session = await hydrateSessionFromDO(env, sessionId);
       if (!session) {
         return errorResponse('Session not found', 404);
+      }
+      if (session.status === 'completed') {
+        return errorResponse('Cannot join completed session', 400);
       }
 
       const body = (await request.json().catch(() => ({}))) as { displayName?: string };
@@ -953,10 +1144,15 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
 
       store.participants.set(participantId, participant);
       store.participantTokens.set(token, participantId);
+      session.connectedParticipants = (session.connectedParticipants ?? 0) + 1;
+
+      persistParticipantToDO(env, participant);
+      await persistSessionToDO(env, session);
 
       broadcastRealtimeEvent(sessionId, 'session.joined', {
         participantId,
         displayName: participant.displayName,
+        connectedParticipants: session.connectedParticipants,
       });
 
       return jsonResponse(participant, 201);
@@ -966,11 +1162,12 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     const sessionGetMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)$/);
     if (method === 'GET' && sessionGetMatch) {
       const sessionId = sessionGetMatch[1]!;
-      const session = store.sessions.get(sessionId);
+      const session = await hydrateSessionFromDO(env, sessionId);
       if (!session) {
         return errorResponse('Session not found', 404);
       }
 
+      await hydratePresentationFromD1(env, session.presentationId);
       const slides = store.slides.get(session.presentationId) || [];
       const presentationAssets = store.assets.get(session.presentationId) || [];
       const currentRevAssets = presentationAssets.filter(
@@ -1018,11 +1215,10 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     const slideMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)\/slide$/);
     if (method === 'POST' && slideMatch) {
       const sessionId = slideMatch[1]!;
+      const session = await hydrateSessionFromDO(env, sessionId);
       if (!authorizePresenter(request, sessionId)) {
         return errorResponse('Unauthorized: Presenter authentication required', 403);
       }
-
-      const session = store.sessions.get(sessionId);
       if (!session) {
         return errorResponse('Session not found', 404);
       }
@@ -1039,12 +1235,14 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         session.revealedSlideIds.push(slideId);
       }
 
-      const presentation = store.presentations.get(session.presentationId);
+      const presentation = await hydratePresentationFromD1(env, session.presentationId);
       let unlockedJustNow = false;
       if (presentation?.endingSlideId === slideId && !session.pdfDownloadUnlocked) {
         session.pdfDownloadUnlocked = true;
         unlockedJustNow = true;
       }
+
+      await persistSessionToDO(env, session);
 
       broadcastRealtimeEvent(sessionId, 'slide.changed', {
         slideId,
@@ -1065,11 +1263,10 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     const completeMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)\/complete$/);
     if (method === 'POST' && completeMatch) {
       const sessionId = completeMatch[1]!;
+      const session = await hydrateSessionFromDO(env, sessionId);
       if (!authorizePresenter(request, sessionId)) {
         return errorResponse('Unauthorized: Presenter authentication required', 403);
       }
-
-      const session = store.sessions.get(sessionId);
       if (!session) {
         return errorResponse('Session not found', 404);
       }
@@ -1077,6 +1274,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       session.status = 'completed';
       session.completedAt = new Date().toISOString();
 
+      await persistSessionToDO(env, session);
       broadcastRealtimeEvent(sessionId, 'session.state', session);
       return jsonResponse(session);
     }
@@ -1087,7 +1285,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       const sessionId = slideDetailMatch[1]!;
       const slideId = slideDetailMatch[2]!;
 
-      const session = store.sessions.get(sessionId);
+      const session = await hydrateSessionFromDO(env, sessionId);
       if (!session) {
         return errorResponse('Session not found', 404);
       }
@@ -1096,6 +1294,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         return errorResponse('Slide has not been revealed yet', 403);
       }
 
+      await hydratePresentationFromD1(env, session.presentationId);
       const slides = store.slides.get(session.presentationId) || [];
       const slide = slides.find((s) => s.id === slideId);
       if (!slide) {
@@ -1590,6 +1789,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     const wsMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)\/ws$/);
     if (wsMatch && request.headers.get('Upgrade') === 'websocket') {
       const sessionId = wsMatch[1]!;
+      await hydrateSessionFromDO(env, sessionId);
       const origin = request.headers.get('Origin');
       const coordinator = getCoordinator(sessionId);
 
@@ -1603,6 +1803,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       if (pair) {
         const [client, server] = new pair();
         (server as unknown as { accept: () => void }).accept?.();
+        asDO(env, sessionId)?.acceptWebSocket(server, ['session']);
         coordinator.handleConnection(server, origin);
         return new Response(null, { status: 101, webSocket: client } as ResponseInit);
       }

@@ -358,13 +358,19 @@ export function duplicatePresentation(
   };
 }
 
+export interface CreateSessionOptions {
+  initialStatus?: 'scheduled' | 'live';
+  firstSlideId?: string | null;
+}
+
 /**
- * Creates a live presentation session (SPEC-002).
+ * Creates a live or scheduled presentation session (SPEC-002).
  */
 export function createLiveSession(
   presentation: Presentation,
   sessionId: string,
   baseUrl: string,
+  options?: CreateSessionOptions,
 ): PresentationSession {
   if (!sessionId || sessionId.trim() === '') {
     throw new Error('Session ID is required');
@@ -373,19 +379,51 @@ export function createLiveSession(
   const cleanBase = baseUrl.replace(/\/+$/, '');
   const audienceUrl = `${cleanBase}/session/${sessionId}`;
   const qrCodeDataUrl = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text x="10" y="50">QR:${sessionId}</text></svg>`;
+  const status = options?.initialStatus ?? 'live';
+  const firstSlideId = status === 'live' ? (options?.firstSlideId ?? null) : null;
 
   return {
     id: sessionId,
     presentationId: presentation.id,
     presentationRevision: presentation.revision,
-    status: 'live',
-    currentSlideId: null,
-    revealedSlideIds: [],
+    status,
+    currentSlideId: firstSlideId,
+    revealedSlideIds: firstSlideId ? [firstSlideId] : [],
     pdfDownloadUnlocked: false,
     audienceUrl,
     qrCodeDataUrl,
     connectedParticipants: 0,
-    startedAt: new Date().toISOString(),
+    startedAt: status === 'live' ? new Date().toISOString() : undefined,
+  };
+}
+
+/**
+ * Transitions a scheduled presentation session to live status (SPEC-002).
+ */
+export function startScheduledSession(
+  session: PresentationSession,
+  slides: SlideMetadata[],
+  actorRole: ActorRole,
+): PresentationSession {
+  if (actorRole === 'attendee') {
+    throw new Error('Unauthorized: attendee cannot start session');
+  }
+  if (session.status === 'completed') {
+    throw new Error('Cannot start a completed session');
+  }
+  const firstSlide = slides[0];
+  const currentSlideId = session.currentSlideId ?? firstSlide?.id ?? null;
+  const revealedSlideIds =
+    currentSlideId && !session.revealedSlideIds.includes(currentSlideId)
+      ? [...session.revealedSlideIds, currentSlideId]
+      : [...session.revealedSlideIds];
+
+  return {
+    ...session,
+    status: 'live',
+    currentSlideId,
+    revealedSlideIds,
+    startedAt: session.startedAt ?? new Date().toISOString(),
   };
 }
 

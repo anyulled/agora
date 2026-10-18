@@ -28,6 +28,7 @@ import {
   recordPollVote,
   sanitizeAndValidateQuestion,
   sortQuestions,
+  startScheduledSession,
   toggleQuestionUpvote,
 } from '../index.js';
 
@@ -233,7 +234,23 @@ describe('Domain Logic — SPEC-001 through SPEC-024', () => {
   });
 
   describe('SPEC-002, SPEC-003 & SPEC-023: Live sessions & presenter navigation authority', () => {
-    it('creates live session with initial state', () => {
+    it('creates live session with initial state and transitions scheduled -> live -> completed (SPEC-002)', () => {
+      const scheduled = createLiveSession(samplePresentation, 'sess-sched', 'https://agora.live', {
+        initialStatus: 'scheduled',
+      });
+      expect(scheduled.status).toBe('scheduled');
+      expect(scheduled.startedAt).toBeUndefined();
+      expect(scheduled.currentSlideId).toBeNull();
+
+      expect(() => startScheduledSession(scheduled, sampleSlides, 'attendee')).toThrow(
+        'Unauthorized',
+      );
+      const started = startScheduledSession(scheduled, sampleSlides, 'presenter');
+      expect(started.status).toBe('live');
+      expect(started.startedAt).toBeDefined();
+      expect(started.currentSlideId).toBe('slide-1');
+      expect(started.revealedSlideIds).toEqual(['slide-1']);
+
       const session = createLiveSession(samplePresentation, 'sess-100', 'https://agora.live');
 
       expect(session.id).toBe('sess-100');

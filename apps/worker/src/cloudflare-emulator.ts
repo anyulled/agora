@@ -337,19 +337,37 @@ export class LocalDurableObjectState {
   constructor(id: { toString(): string; name?: string }, db: DatabaseSync) {
     this.id = id;
     this.db = db;
+    this.db.exec(
+      'CREATE TABLE IF NOT EXISTS _do_kv (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);',
+    );
     const sqlStorage = new LocalSqlStorage(db);
     const kv = this.kvStore;
 
     this.storage = {
       sql: sqlStorage,
       async get<T>(key: string): Promise<T | undefined> {
-        return kv.get(key) as T | undefined;
+        if (kv.has(key)) {
+          return kv.get(key) as T | undefined;
+        }
+        const row = db.prepare('SELECT value_json FROM _do_kv WHERE key = ?').get(key) as
+          | { value_json: string }
+          | undefined;
+        if (!row) return undefined;
+        const parsed = JSON.parse(row.value_json) as T;
+        kv.set(key, parsed);
+        return parsed;
       },
       async put<T>(key: string, val: T): Promise<void> {
         kv.set(key, val);
+        db.prepare('INSERT OR REPLACE INTO _do_kv (key, value_json) VALUES (?, ?)').run(
+          key,
+          JSON.stringify(val),
+        );
       },
       async delete(key: string): Promise<boolean> {
-        return kv.delete(key);
+        const existed = kv.delete(key);
+        const res = db.prepare('DELETE FROM _do_kv WHERE key = ?').run(key);
+        return existed || Number(res.changes) > 0;
       },
     };
   }

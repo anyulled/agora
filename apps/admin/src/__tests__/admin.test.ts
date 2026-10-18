@@ -251,14 +251,17 @@ describe('AdminAppController (SPEC-001, SPEC-013, SPEC-015, SPEC-017, SPEC-024)'
   });
 
   describe('View-Model HTML Renderers', () => {
-    it('renders dashboard HTML with presentations and delete modal placeholder', () => {
-      admin.createPresentation({ title: 'Dashboard Presentation' });
+    it('renders dashboard HTML with presentations, active session join URL, QR code, and delete modal placeholder (SPEC-002)', () => {
+      const pres = admin.createPresentation({ title: 'Dashboard Presentation' });
+      const session = admin.startLiveSession(pres.id);
       const vm = admin.getDashboardViewModel();
       const html = renderAdminDashboardHtml(vm);
 
       expect(html).toContain('Dashboard Presentation');
       expect(html).toContain('Start Live Session');
       expect(html).toContain('Generate Images');
+      expect(html).toContain(session.audienceUrl);
+      expect(html).toContain('session-qr-code');
     });
 
     it('renders delete confirmation modal when open', () => {

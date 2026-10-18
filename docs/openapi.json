@@ -1,0 +1,2423 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Agora Interactive Conference Presentation API",
+    "version": "1.0.0",
+    "description": "OpenAPI 3.1.0 specification for Agora Cloudflare Worker, D1, R2, and Durable Object live session endpoints (SPEC-001 through SPEC-024)."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8787",
+      "description": "Local Cloudflare Emulation Environment"
+    },
+    {
+      "url": "https://api.agora.live",
+      "description": "Production Cloudflare Worker Edge"
+    }
+  ],
+  "tags": [
+    {
+      "name": "OpenAPI",
+      "description": "API specification and interactive documentation"
+    },
+    {
+      "name": "Presentations",
+      "description": "Presentation administration, revisions, and R2/D1 assets (SPEC-001, SPEC-017)"
+    },
+    {
+      "name": "Sessions",
+      "description": "Live presentation sessions, Durable Object SQLite state, and navigation (SPEC-002, SPEC-003, SPEC-022)"
+    },
+    {
+      "name": "Questions",
+      "description": "Slide-scoped Q&A and idempotent upvoting (SPEC-006, SPEC-007)"
+    },
+    {
+      "name": "Interactions",
+      "description": "Emoji reactions, contextual polls, adaptive navigation, and word clouds"
+    },
+    {
+      "name": "Downloads",
+      "description": "Gated R2 PNG and PDF asset downloads (SPEC-014, SPEC-016, SPEC-024)"
+    }
+  ],
+  "paths": {
+    "/api/v1/openapi.json": {
+      "get": {
+        "tags": ["OpenAPI"],
+        "operationId": "getOpenApiSpec",
+        "summary": "Retrieve OpenAPI 3.1.0 JSON specification",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1.0 specification document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs": {
+      "get": {
+        "tags": ["OpenAPI"],
+        "operationId": "getOpenApiDocs",
+        "summary": "Render interactive OpenAPI documentation UI",
+        "responses": {
+          "200": {
+            "description": "HTML documentation viewer",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/presentations": {
+      "get": {
+        "tags": ["Presentations"],
+        "operationId": "listPresentations",
+        "summary": "List all presentations",
+        "responses": {
+          "200": {
+            "description": "Array of presentations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Presentation"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Presentations"],
+        "operationId": "createPresentation",
+        "summary": "Create a new presentation (SPEC-001)",
+        "security": [
+          {
+            "AdminBearerAuth": []
+          },
+          {
+            "AdminHeaderToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresentationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created presentation with deterministic SHA-256 revisionHash",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Presentation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/presentations/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Presentation identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": ["Presentations"],
+        "operationId": "getPresentation",
+        "summary": "Get presentation by ID with slides and revision status",
+        "responses": {
+          "200": {
+            "description": "Presentation details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Presentation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Presentation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["Presentations"],
+        "operationId": "replacePresentation",
+        "summary": "Update presentation, bump revision, and purge stale assets (SPEC-001)",
+        "security": [
+          {
+            "AdminBearerAuth": []
+          },
+          {
+            "AdminHeaderToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresentationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated presentation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Presentation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Presentation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": ["Presentations"],
+        "operationId": "updatePresentation",
+        "summary": "Partially update presentation, bump revision, and purge stale assets (SPEC-001)",
+        "security": [
+          {
+            "AdminBearerAuth": []
+          },
+          {
+            "AdminHeaderToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresentationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated presentation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Presentation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Presentation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Presentations"],
+        "operationId": "deletePresentation",
+        "summary": "Delete presentation (requires confirmDestroy confirmation)",
+        "security": [
+          {
+            "AdminBearerAuth": []
+          },
+          {
+            "AdminHeaderToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "confirmDestroy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deletion confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "deleted": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing confirmDestroy confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Presentation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/presentations/{id}/duplicate": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Source presentation identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Presentations"],
+        "operationId": "duplicatePresentation",
+        "summary": "Duplicate presentation without copying sessions or audience data (SPEC-017)",
+        "security": [
+          {
+            "AdminBearerAuth": []
+          },
+          {
+            "AdminHeaderToken": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Duplicated presentation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Presentation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Source presentation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/presentations/{id}/assets": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Presentation identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Presentations"],
+        "operationId": "uploadPresentationAsset",
+        "summary": "Upload slide PNG or deck PDF asset tied to presentation revision (SPEC-013, SPEC-015)",
+        "security": [
+          {
+            "AdminBearerAuth": []
+          },
+          {
+            "AdminHeaderToken": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Registered asset manifest entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetManifestEntry"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Presentation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision mismatch conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/presentations/{id}/sessions": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Presentation identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Sessions"],
+        "operationId": "createSession",
+        "summary": "Create a scheduled or live presentation session (SPEC-002)",
+        "security": [
+          {
+            "AdminBearerAuth": []
+          },
+          {
+            "AdminHeaderToken": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": ["scheduled", "live"]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created session with presenterToken and QR code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentationSession"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Presentation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": ["Sessions"],
+        "operationId": "getAudienceSafeSession",
+        "summary": "Fetch audience-safe session state (SPEC-002, SPEC-004, SPEC-005)",
+        "responses": {
+          "200": {
+            "description": "Audience-safe session view",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudienceSafeSessionView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/start": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Sessions"],
+        "operationId": "startSession",
+        "summary": "Transition a scheduled session to live status (SPEC-002)",
+        "security": [
+          {
+            "PresenterBearerAuth": []
+          },
+          {
+            "PresenterHeaderToken": []
+          },
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live session state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentationSession"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cannot start a completed session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Unauthorized presenter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/join": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Sessions"],
+        "operationId": "joinSession",
+        "summary": "Anonymous attendee join returning session-scoped participant token (SPEC-002)",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "displayName": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Issued participant identity and token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParticipantIdentity"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Session already completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/slide": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Sessions"],
+        "operationId": "navigateSessionSlide",
+        "summary": "Navigate authoritative presenter slide and unlock PDF on ending slide (SPEC-003, SPEC-023)",
+        "security": [
+          {
+            "PresenterBearerAuth": []
+          },
+          {
+            "PresenterHeaderToken": []
+          },
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["slideId"],
+                "properties": {
+                  "slideId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated session state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentationSession"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or invalid slideId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Unauthorized presenter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/complete": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Sessions"],
+        "operationId": "completeSession",
+        "summary": "Explicitly mark session as completed (SPEC-002, SPEC-022)",
+        "security": [
+          {
+            "PresenterBearerAuth": []
+          },
+          {
+            "PresenterHeaderToken": []
+          },
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Completed session state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentationSession"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Unauthorized presenter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/slides/{slideId}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "slideId",
+          "in": "path",
+          "required": true,
+          "description": "Slide identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": ["Sessions"],
+        "operationId": "getRevealedSlideMetadata",
+        "summary": "Fetch metadata for a revealed slide (SPEC-005)",
+        "responses": {
+          "200": {
+            "description": "Revealed slide metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlideMetadata"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Slide has not been revealed yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session or slide not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/questions": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": ["Questions"],
+        "operationId": "listSessionQuestions",
+        "summary": "List questions for session (optionally filtered by slideId)",
+        "parameters": [
+          {
+            "name": "slideId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Questions list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AudienceQuestion"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Questions"],
+        "operationId": "submitQuestion",
+        "summary": "Submit a slide-scoped audience question (SPEC-006)",
+        "security": [
+          {
+            "ParticipantBearerAuth": []
+          },
+          {
+            "ParticipantHeaderToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["slideId", "content"],
+                "properties": {
+                  "slideId": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created question",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudienceQuestion"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid question content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized participant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Slide not revealed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/questions/{questionId}/upvote": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "questionId",
+          "in": "path",
+          "required": true,
+          "description": "Question identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Questions"],
+        "operationId": "toggleQuestionUpvote",
+        "summary": "Idempotently toggle participant upvote on a question (SPEC-007)",
+        "security": [
+          {
+            "ParticipantBearerAuth": []
+          },
+          {
+            "ParticipantHeaderToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated question upvote count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudienceQuestion"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized participant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Question not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/questions/{questionId}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "questionId",
+          "in": "path",
+          "required": true,
+          "description": "Question identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "patch": {
+        "tags": ["Questions"],
+        "operationId": "updateQuestionStatus",
+        "summary": "Update question status to pending, answered, or dismissed (SPEC-006)",
+        "security": [
+          {
+            "PresenterBearerAuth": []
+          },
+          {
+            "PresenterHeaderToken": []
+          },
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": ["pending", "answered", "dismissed"]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated question",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudienceQuestion"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Unauthorized presenter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Question not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/reactions": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Interactions"],
+        "operationId": "submitReaction",
+        "summary": "Submit emoji reaction for a revealed slide (SPEC-009)",
+        "security": [
+          {
+            "ParticipantBearerAuth": []
+          },
+          {
+            "ParticipantHeaderToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["slideId", "reaction"],
+                "properties": {
+                  "slideId": {
+                    "type": "string"
+                  },
+                  "reaction": {
+                    "type": "string",
+                    "enum": ["👍", "🤔", "❤️", "😴"]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated reaction summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "summary": {
+                      "$ref": "#/components/schemas/ReactionCounts"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid reaction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized participant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Slide not revealed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/polls": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Interactions"],
+        "operationId": "createPoll",
+        "summary": "Create and open a contextual slide poll (SPEC-010)",
+        "security": [
+          {
+            "PresenterBearerAuth": []
+          },
+          {
+            "PresenterHeaderToken": []
+          },
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["slideId", "question", "options"],
+                "properties": {
+                  "slideId": {
+                    "type": "string"
+                  },
+                  "question": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["single", "multiple", "binary"]
+                  },
+                  "options": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["id", "label"],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created poll",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PollDefinition"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid poll definition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Unauthorized presenter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/polls/{pollId}/vote": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pollId",
+          "in": "path",
+          "required": true,
+          "description": "Poll identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Interactions"],
+        "operationId": "votePoll",
+        "summary": "Submit participant vote in poll and evaluate adaptive navigation (SPEC-010, SPEC-011)",
+        "security": [
+          {
+            "ParticipantBearerAuth": []
+          },
+          {
+            "ParticipantHeaderToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["optionId"],
+                "properties": {
+                  "optionId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Poll results summary and navigation suggestions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "summary": {
+                      "$ref": "#/components/schemas/PollResultsSummary"
+                    },
+                    "suggestions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid option or closed poll",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized participant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Participant already voted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/wordclouds": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Interactions"],
+        "operationId": "createWordCloud",
+        "summary": "Create and open a word cloud prompt (SPEC-021)",
+        "security": [
+          {
+            "PresenterBearerAuth": []
+          },
+          {
+            "PresenterHeaderToken": []
+          },
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["slideId", "prompt"],
+                "properties": {
+                  "slideId": {
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created word cloud prompt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WordCloudPrompt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid prompt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Unauthorized presenter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/wordclouds/{promptId}/submit": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "promptId",
+          "in": "path",
+          "required": true,
+          "description": "Word cloud prompt identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Interactions"],
+        "operationId": "submitWordCloudTerm",
+        "summary": "Submit normalized term to word cloud (SPEC-021)",
+        "security": [
+          {
+            "ParticipantBearerAuth": []
+          },
+          {
+            "ParticipantHeaderToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["term"],
+                "properties": {
+                  "term": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated word cloud aggregate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WordCloudAggregate"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or closed prompt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized participant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/slides/{slideId}/download": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "slideId",
+          "in": "path",
+          "required": true,
+          "description": "Slide identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": ["Downloads"],
+        "operationId": "downloadSlidePng",
+        "summary": "Download gated single-slide PNG if slide is revealed (SPEC-014, SPEC-024)",
+        "responses": {
+          "200": {
+            "description": "PNG slide image binary stream",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Slide has not been revealed yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session or current-revision PNG not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/download": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": ["Downloads"],
+        "operationId": "downloadPresentationPdf",
+        "summary": "Download gated full presentation PDF after ending slide visit (SPEC-016, SPEC-024)",
+        "responses": {
+          "200": {
+            "description": "PDF presentation binary stream",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PDF download is locked until ending slide is reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session or current-revision PDF not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/ws": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": ["Sessions"],
+        "operationId": "connectSessionWebSocket",
+        "summary": "Upgrade connection to WebSocket real-time session stream and restore state (SPEC-002, SPEC-019)",
+        "responses": {
+          "101": {
+            "description": "Switching Protocols — WebSocket connection established"
+          },
+          "200": {
+            "description": "WebSocket endpoint ready"
+          },
+          "403": {
+            "description": "Origin not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "AdminBearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Admin secret bearer token"
+      },
+      "AdminHeaderToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-admin-token"
+      },
+      "PresenterBearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Session-scoped presenter token"
+      },
+      "PresenterHeaderToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-presenter-token"
+      },
+      "ParticipantBearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Session-scoped pseudonymous participant token"
+      },
+      "ParticipantHeaderToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-participant-token"
+      }
+    },
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "SlideMetadata": {
+        "type": "object",
+        "required": ["id", "presentationId", "title", "horizontalIndex", "verticalIndex", "order"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "presentationId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "horizontalIndex": {
+            "type": "integer"
+          },
+          "verticalIndex": {
+            "type": "integer"
+          },
+          "order": {
+            "type": "integer"
+          },
+          "isQaSlide": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PresentationInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "eventName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["draft", "published"]
+          },
+          "endingSlideId": {
+            "type": "string"
+          },
+          "branding": {
+            "type": "object",
+            "properties": {
+              "colors": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "logoAssetId": {
+                "type": "string"
+              }
+            }
+          },
+          "slides": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SlideMetadata"
+            }
+          }
+        }
+      },
+      "Presentation": {
+        "type": "object",
+        "required": ["id", "title", "revision", "status", "endingSlideId", "branding"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "eventName": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "revisionHash": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["draft", "published"]
+          },
+          "endingSlideId": {
+            "type": "string"
+          },
+          "branding": {
+            "type": "object"
+          },
+          "slides": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SlideMetadata"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AssetManifestEntry": {
+        "type": "object",
+        "required": [
+          "assetId",
+          "presentationId",
+          "revision",
+          "kind",
+          "r2Key",
+          "contentType",
+          "byteSize"
+        ],
+        "properties": {
+          "assetId": {
+            "type": "string"
+          },
+          "presentationId": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["slide-png", "deck-pdf", "logo"]
+          },
+          "slideId": {
+            "type": "string"
+          },
+          "r2Key": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "byteSize": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PresentationSession": {
+        "type": "object",
+        "required": [
+          "id",
+          "presentationId",
+          "presentationRevision",
+          "status",
+          "revealedSlideIds",
+          "pdfDownloadUnlocked"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "presentationId": {
+            "type": "string"
+          },
+          "presentationRevision": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["scheduled", "live", "completed"]
+          },
+          "currentSlideId": {
+            "type": ["string", "null"]
+          },
+          "revealedSlideIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pdfDownloadUnlocked": {
+            "type": "boolean"
+          },
+          "audienceUrl": {
+            "type": "string"
+          },
+          "qrCodeDataUrl": {
+            "type": "string"
+          },
+          "connectedParticipants": {
+            "type": "integer"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ParticipantIdentity": {
+        "type": "object",
+        "required": ["id", "sessionId", "token", "joinedAt"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "joinedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AudienceQuestion": {
+        "type": "object",
+        "required": ["id", "sessionId", "slideId", "participantId", "content", "status", "upvotes"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "slideId": {
+            "type": "string"
+          },
+          "participantId": {
+            "type": "string"
+          },
+          "participantName": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "answered", "dismissed"]
+          },
+          "upvotes": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PollDefinition": {
+        "type": "object",
+        "required": ["id", "sessionId", "slideId", "question", "type", "options", "status"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "slideId": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["single", "multiple", "binary"]
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": ["draft", "open", "closed"]
+          },
+          "resultsRevealed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PollResultsSummary": {
+        "type": "object",
+        "required": ["pollId", "slideId", "status", "totalResponses", "countsByOptionId"],
+        "properties": {
+          "pollId": {
+            "type": "string"
+          },
+          "slideId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "resultsRevealed": {
+            "type": "boolean"
+          },
+          "totalResponses": {
+            "type": "integer"
+          },
+          "countsByOptionId": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "WordCloudPrompt": {
+        "type": "object",
+        "required": ["id", "sessionId", "slideId", "prompt", "status"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "slideId": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["draft", "open", "closed"]
+          }
+        }
+      },
+      "WordCloudAggregate": {
+        "type": "object",
+        "required": ["promptId", "slideId", "status", "totalSubmissions", "terms"],
+        "properties": {
+          "promptId": {
+            "type": "string"
+          },
+          "slideId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "totalSubmissions": {
+            "type": "integer"
+          },
+          "terms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "term": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ReactionCounts": {
+        "type": "object",
+        "properties": {
+          "👍": {
+            "type": "integer"
+          },
+          "🤔": {
+            "type": "integer"
+          },
+          "❤️": {
+            "type": "integer"
+          },
+          "😴": {
+            "type": "integer"
+          }
+        }
+      },
+      "AudienceSafeSessionView": {
+        "type": "object",
+        "required": [
+          "session",
+          "slides",
+          "availablePngSlideIds",
+          "pdfAvailable",
+          "questions",
+          "activePolls",
+          "activeWordClouds",
+          "reactionSummary"
+        ],
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/PresentationSession"
+          },
+          "slides": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SlideMetadata"
+            }
+          },
+          "availablePngSlideIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pdfAvailable": {
+            "type": "boolean"
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AudienceQuestion"
+            }
+          },
+          "activePolls": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PollResultsSummary"
+            }
+          },
+          "activeWordClouds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WordCloudAggregate"
+            }
+          },
+          "reactionSummary": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ReactionCounts"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { validateCommitMessage } from '../../harness/verify-commit-msg.mjs';
 import { evaluateDuplicationOutput } from '../../harness/verify-duplication.mjs';
 import { extractMermaidBlocks, validateMermaidDiagram } from '../../harness/verify-mermaid.mjs';
+import { verifyOpenApiSpec, verifyWorkspaceOpenApi } from '../../harness/verify-openapi.mjs';
 
 describe('Commit Message Validation', () => {
   it('allows valid conventional commit messages', () => {
@@ -147,5 +148,32 @@ describe('Commit Message Validation', () => {
     const invalidCheck = await validateMermaidDiagram(invalidSequenceDiagram);
     expect(invalidCheck.valid).toBe(false);
     expect(invalidCheck.error).toContain('Parse error');
+  });
+
+  it('validates OpenAPI 3.1.0 specification and ensures full Worker route coverage', () => {
+    const report = verifyWorkspaceOpenApi();
+    expect(report.passed).toBe(true);
+    expect(report.pathCount).toBeGreaterThanOrEqual(24);
+    expect(report.schemaCount).toBeGreaterThanOrEqual(14);
+    expect(report.errors).toEqual([]);
+
+    const brokenReport = verifyOpenApiSpec(
+      {
+        openapi: '3.1.0',
+        info: { title: 'Test', version: '1.0.0' },
+        paths: {
+          '/api/v1/test': {
+            get: { responses: { '200': { $ref: '#/components/schemas/MissingSchema' } } },
+          },
+        },
+        components: { schemas: {}, securitySchemes: { Auth: { type: 'http' } } },
+      },
+      "if (path === '/api/v1/undocumented') {}",
+    );
+    expect(brokenReport.passed).toBe(false);
+    expect(brokenReport.errors).toContain("Unresolved $ref '#/components/schemas/MissingSchema'");
+    expect(brokenReport.errors).toContain(
+      'Undocumented Worker route in OpenAPI spec: /api/v1/undocumented',
+    );
   });
 });

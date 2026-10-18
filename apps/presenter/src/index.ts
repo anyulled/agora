@@ -27,6 +27,8 @@ export interface PresenterViewState {
   presentationId: string;
   presentationTitle: string;
   sessionStatus: PresentationSession['status'];
+  audienceUrl?: string;
+  qrCodeDataUrl?: string;
   currentSlide: SlideMetadata | null;
   horizontalIndex: number;
   verticalIndex: number;
@@ -359,6 +361,8 @@ export class PresenterAppController {
       presentationId: this.presentation.id,
       presentationTitle: this.presentation.title,
       sessionStatus: this.session.status,
+      audienceUrl: this.session.audienceUrl,
+      qrCodeDataUrl: this.session.qrCodeDataUrl,
       currentSlide,
       horizontalIndex: this.currentHorizontalIndex,
       verticalIndex: this.currentVerticalIndex,
@@ -445,6 +449,14 @@ export function renderPresenterViewHtml(state: PresenterViewState): string {
     }
   }
 
+  const sessionJoinBanner =
+    state.audienceUrl || state.qrCodeDataUrl
+      ? `<div class="session-join-banner">
+          ${state.audienceUrl ? `<p class="presenter-join-url">Join: <a href="${state.audienceUrl}">${state.audienceUrl}</a></p>` : ''}
+          ${state.qrCodeDataUrl ? `<img src="${state.qrCodeDataUrl}" alt="Audience join QR code" class="presenter-qr-code" />` : ''}
+        </div>`
+      : '';
+
   return `
     <div class="presenter-console">
       ${suggestionBanner}
@@ -455,6 +467,7 @@ export function renderPresenterViewHtml(state: PresenterViewState): string {
           ${qaViewHtml}
         </section>
         <aside class="presenter-sidebar">
+          ${sessionJoinBanner}
           <div class="metrics-hud">
             <div class="metric-item">
               <span class="metric-label">Attendees</span>

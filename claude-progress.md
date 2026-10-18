@@ -151,3 +151,24 @@
 - **Verification Evidence**:
   - `pnpm run lint:mermaid`: `✅ Mermaid validation passed (15 diagram(s) across 29 Markdown file(s)).`
   - `./init.sh` and `pnpm run verify`: 13/13 test suites (132 tests) passing.
+
+---
+
+## Session 010 — 2026-10-19
+- **Role**: Live Sessions & OpenAPI 3.1.0 Documentation Engineer (`#6 SPEC-002`)
+- **Goals**:
+  1. Implement the next open issue by priority level (`#6 SPEC-002: Live sessions`, Priority 2):
+     - Support `'scheduled'` -> `'live'` -> `'completed'` session lifecycle transitions in `@agora/domain` (`createLiveSession`, `startScheduledSession`) and `@agora/worker` (`POST /api/v1/presentations/:id/sessions`, `POST /api/v1/sessions/:id/start`, `POST /api/v1/sessions/:id/complete`).
+     - Wire Durable Object embedded SQLite (`env.SESSION_COORDINATOR` / `state.storage.sql` `session_state`, `participants`, `_do_kv`) persistence and hydration across Worker restarts.
+     - Restore authoritative `session.state` snapshot immediately on WebSocket connection/reconnection (`GET /api/v1/sessions/:id/ws`).
+     - Render unique audience join URL and scannable QR code in both Admin Dashboard (`renderAdminDashboardHtml`) and Presenter Console (`renderPresenterViewHtml`).
+  2. Document all Worker HTTP & WebSocket endpoints with OpenAPI 3.1.0 (`apps/worker/src/openapi.ts`, `docs/openapi.json`, `GET /api/v1/openapi.json`, `GET /api/v1/docs`) and enforce 100% route coverage via `harness/verify-openapi.mjs` (`pnpm run lint:openapi`).
+- **Completed**:
+  - Added `startScheduledSession` and `CreateSessionOptions` to `packages/domain/src/index.ts`.
+  - Updated `apps/admin/src/index.ts` and `apps/presenter/src/index.ts` to render the session `audienceUrl` and `qrCodeDataUrl`.
+  - Wired Durable Object SQLite persistence (`persistSessionToDO`, `persistParticipantToDO`, `hydrateSessionFromDO`) and WebSocket reconnect `session.state` restoration into `apps/worker/src/index.ts` and `apps/worker/src/cloudflare-emulator.ts`.
+  - Created `apps/worker/src/openapi.ts`, `docs/openapi.json`, and `harness/verify-openapi.mjs` (`pnpm run lint:openapi`) documenting all 24 API paths and 14 component schemas.
+- **Verification Evidence**:
+  - `pnpm run lint:openapi`: `✅ OpenAPI 3.1.0 validation passed (24 path(s), 14 schema(s) verified against Worker routes).`
+  - `./init.sh` and `pnpm run verify`: 13/13 test suites (134 tests) passing, `1.3%` duplication (`<= 10%`).
+

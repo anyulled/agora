@@ -37,6 +37,7 @@
 [![ESLint: Flat Config Strict](https://img.shields.io/badge/ESLint_9-Flat_Config_Strict-4B32C3?logo=eslint&logoColor=white)](./eslint.config.mjs)
 [![jscpd Duplication: 1.7% (<10% Gate)](https://img.shields.io/badge/jscpd_Duplication-1.7%25_(%3C10%25_Gate)-brightgreen)](./.jscpd.json)
 [![Mermaid Diagrams: Validated](https://img.shields.io/badge/Mermaid_Diagrams-MCP_%26_CLI_Validated-FF3670?logo=mermaid&logoColor=white)](./harness/verify-mermaid.mjs)
+[![OpenAPI: 3.1.0 Verified](https://img.shields.io/badge/OpenAPI-3.1.0_Verified-6BA539?logo=openapiinitiative&logoColor=white)](./docs/openapi.json)
 [![Code Style: Biome](https://img.shields.io/badge/Checked_with-Biome-60a5fa?style=flat&logo=biome)](https://biomejs.dev/)
 [![Accessibility: WCAG 2.2 AA](https://img.shields.io/badge/Accessibility-WCAG_2.2_AA-005A9C?logo=w3c)](./docs/FRONTEND.md)
 [![Local Emulation: D1 + R2 + DO SQLite](https://img.shields.io/badge/Local_Emulation-D1_%2B_R2_%2B_DO_SQLite-F38020?logo=cloudflare)](./docs/DESIGN.md)
