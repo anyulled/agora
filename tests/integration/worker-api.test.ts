@@ -593,4 +593,137 @@ describe('Worker HTTP API Integration Tests', () => {
     expect(wcAggregate.terms[0]?.term).toBe('realtime');
     expect(wcAggregate.terms[0]?.count).toBe(1);
   });
+
+  it('SPEC-003 / SPEC-003b: presenter WebSocket slide.changed synchronization, backward navigation revealed preservation, and unauthorized dispatch rejection', async () => {
+    const presRes = await app.fetch(
+      new Request('https://api.agora.test/api/v1/presentations', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'Reveal WS Sync Deck',
+          endingSlideId: 'slide-2',
+          slides: [
+            {
+              id: 'slide-0',
+              presentationId: 'p-ws',
+              title: 'Intro',
+              horizontalIndex: 0,
+              verticalIndex: 0,
+              order: 0,
+            },
+            {
+              id: 'slide-1-1',
+              presentationId: 'p-ws',
+              title: 'Vertical Detail',
+              horizontalIndex: 1,
+              verticalIndex: 1,
+              order: 1,
+            },
+            {
+              id: 'slide-2',
+              presentationId: 'p-ws',
+              title: 'Conclusion',
+              horizontalIndex: 2,
+              verticalIndex: 0,
+              order: 2,
+            },
+          ],
+        }),
+      }),
+    );
+    const pres = (await presRes.json()) as Presentation;
+
+    const sessRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/presentations/${pres.id}/sessions`, {
+        method: 'POST',
+        headers: adminHeaders,
+      }),
+    );
+    const session = (await sessRes.json()) as PresentationSession & { presenterToken: string };
+
+    const coordinator = app.getCoordinator(session.id);
+
+    const presenterReceived: string[] = [];
+    const presenterWs = {
+      readyState: WebSocket.OPEN,
+      send: (msg: string) => presenterReceived.push(msg),
+      close: () => {},
+    } as unknown as WebSocket;
+
+    const audienceReceived: string[] = [];
+    const audienceWs = {
+      readyState: WebSocket.OPEN,
+      send: (msg: string) => audienceReceived.push(msg),
+      close: () => {},
+    } as unknown as WebSocket;
+
+    // 1. Handshake: both presenter and audience receive initial session.state snapshot
+    expect(
+      coordinator.handleConnection(presenterWs, 'https://agora.test', session.presenterToken),
+    ).toBe(true);
+    expect(coordinator.handleConnection(audienceWs, 'https://agora.test', null)).toBe(true);
+    expect(presenterReceived.length).toBe(1);
+    expect(JSON.parse(presenterReceived[0]!).type).toBe('session.state');
+
+    // 2. Reject unauthenticated/audience navigation dispatch attempt
+    const unauthOk = coordinator.handleMessage(
+      audienceWs,
+      JSON.stringify({
+        type: 'slide.changed',
+        sessionId: session.id,
+        payload: {
+          slideId: 'slide-2',
+          horizontalIndex: 2,
+          verticalIndex: 0,
+          timestamp: new Date().toISOString(),
+        },
+      }),
+    );
+    expect(unauthOk).toBe(false);
+    expect(app.store.sessions.get(session.id)?.currentSlideId).toBe('slide-0');
+    const lastAudienceMsg = JSON.parse(audienceReceived[audienceReceived.length - 1]!);
+    expect(lastAudienceMsg.type).toBe('error');
+    expect(lastAudienceMsg.payload.code).toBe('UNAUTHORIZED_NAVIGATION');
+
+    // 3. Authorized presenter dispatches forward 2D navigation -> p95 < 500ms
+    const t0 = performance.now();
+    const forwardOk = coordinator.handleMessage(
+      presenterWs,
+      JSON.stringify({
+        id: 'evt-nav-forward',
+        type: 'slide.changed',
+        sessionId: session.id,
+        payload: {
+          slideId: 'slide-1-1',
+          horizontalIndex: 1,
+          verticalIndex: 1,
+          timestamp: new Date().toISOString(),
+        },
+      }),
+    );
+    const latencyMs = performance.now() - t0;
+    expect(forwardOk).toBe(true);
+    expect(latencyMs).toBeLessThan(500);
+    expect(app.store.sessions.get(session.id)?.currentSlideId).toBe('slide-1-1');
+    expect(app.store.sessions.get(session.id)?.revealedSlideIds).toEqual(['slide-0', 'slide-1-1']);
+
+    // 4. Backward navigation maintains previously revealed slide status on the server
+    const backwardOk = coordinator.handleMessage(
+      presenterWs,
+      JSON.stringify({
+        id: 'evt-nav-backward',
+        type: 'slide.changed',
+        sessionId: session.id,
+        payload: {
+          slideId: 'slide-0',
+          horizontalIndex: 0,
+          verticalIndex: 0,
+          timestamp: new Date().toISOString(),
+        },
+      }),
+    );
+    expect(backwardOk).toBe(true);
+    expect(app.store.sessions.get(session.id)?.currentSlideId).toBe('slide-0');
+    expect(app.store.sessions.get(session.id)?.revealedSlideIds).toEqual(['slide-0', 'slide-1-1']);
+  });
 });

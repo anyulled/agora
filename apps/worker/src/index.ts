@@ -93,6 +93,7 @@ export class InMemoryAgoraStore {
 
 export class SessionCoordinatorDO {
   private sockets = new Set<WebSocket>();
+  private socketTokens = new Map<WebSocket, string | null>();
   private store: InMemoryAgoraStore;
   private sessionId: string;
   private allowedOrigins: string[];
@@ -109,13 +110,24 @@ export class SessionCoordinatorDO {
     return this.allowedOrigins.includes(origin);
   }
 
-  public handleConnection(ws: WebSocket, origin: string | null): boolean {
+  public handleConnection(
+    ws: WebSocket,
+    origin: string | null,
+    authToken: string | null = null,
+  ): boolean {
     if (!this.validateOrigin(origin)) {
       ws.close(1008, 'Origin not allowed');
       return false;
     }
 
     this.sockets.add(ws);
+    this.socketTokens.set(ws, authToken);
+
+    ws.addEventListener?.('message', (event: MessageEvent) => {
+      if (typeof event.data === 'string') {
+        this.handleMessage(ws, event.data);
+      }
+    });
 
     // SPEC-002: Restore authoritative session state snapshot upon WebSocket connection/reconnection
     const session = this.store.sessions.get(this.sessionId);
@@ -139,8 +151,104 @@ export class SessionCoordinatorDO {
     return true;
   }
 
+  public handleMessage(ws: WebSocket, rawMessage: string, overrideToken?: string | null): boolean {
+    let parsed: {
+      id?: string;
+      type?: string;
+      token?: string;
+      payload?: Record<string, unknown>;
+    } | null = null;
+
+    try {
+      parsed = JSON.parse(rawMessage);
+    } catch {
+      return false;
+    }
+
+    if (!parsed || typeof parsed !== 'object') return false;
+
+    if (parsed.type === 'slide.changed') {
+      const expectedToken = this.store.presenterTokens.get(this.sessionId);
+      const candidateToken =
+        overrideToken ??
+        (typeof parsed.token === 'string' ? parsed.token : null) ??
+        this.socketTokens.get(ws) ??
+        null;
+
+      if (!expectedToken || !candidateToken || candidateToken !== expectedToken) {
+        const errorEvent: RealtimeEvent<{ code: string; message: string }> = {
+          id: `evt-err-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          type: 'error',
+          sessionId: this.sessionId,
+          timestamp: new Date().toISOString(),
+          payload: {
+            code: 'UNAUTHORIZED_NAVIGATION',
+            message: 'Unauthorized: Presenter authentication required',
+          },
+        };
+        try {
+          if (ws.readyState === undefined || ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(errorEvent));
+          }
+        } catch {
+          // Ignore send error
+        }
+        return false;
+      }
+
+      const session = this.store.sessions.get(this.sessionId);
+      if (!session || session.status !== 'live') {
+        return false;
+      }
+
+      const payload = parsed.payload ?? {};
+      const slideId = typeof payload.slideId === 'string' ? payload.slideId.trim() : '';
+      if (!slideId) return false;
+
+      const horizontalIndex =
+        typeof payload.horizontalIndex === 'number' ? payload.horizontalIndex : 0;
+      const verticalIndex = typeof payload.verticalIndex === 'number' ? payload.verticalIndex : 0;
+      const timestamp =
+        typeof payload.timestamp === 'string' ? payload.timestamp : new Date().toISOString();
+
+      session.currentSlideId = slideId;
+      // SPEC-003: Backward slide navigation maintains previously revealed slide status
+      if (!session.revealedSlideIds.includes(slideId)) {
+        session.revealedSlideIds.push(slideId);
+      }
+
+      const presentation = this.store.presentations.get(session.presentationId);
+      if (presentation?.endingSlideId === slideId && !session.pdfDownloadUnlocked) {
+        session.pdfDownloadUnlocked = true;
+      }
+
+      const eventId =
+        typeof parsed.id === 'string' && parsed.id
+          ? parsed.id
+          : `evt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+      this.broadcast({
+        id: eventId,
+        type: 'slide.changed',
+        sessionId: this.sessionId,
+        timestamp,
+        payload: {
+          slideId,
+          horizontalIndex,
+          verticalIndex,
+          timestamp,
+          revealedSlideIds: session.revealedSlideIds,
+        },
+      });
+      return true;
+    }
+
+    return false;
+  }
+
   public removeConnection(ws: WebSocket): void {
     this.sockets.delete(ws);
+    this.socketTokens.delete(ws);
   }
 
   public isEventProcessed(eventId: string): boolean {
@@ -167,6 +275,7 @@ export class SessionCoordinatorDO {
         }
       } catch {
         this.sockets.delete(socket);
+        this.socketTokens.delete(socket);
       }
     }
   }
@@ -1223,12 +1332,34 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         return errorResponse('Session not found', 404);
       }
 
-      const body = (await request.json().catch(() => ({}))) as { slideId?: string };
+      const body = (await request.json().catch(() => ({}))) as {
+        slideId?: string;
+        indexh?: number;
+        indexv?: number;
+        horizontalIndex?: number;
+        verticalIndex?: number;
+        timestamp?: string;
+      };
       if (!body.slideId) {
         return errorResponse('slideId is required', 400);
       }
 
       const slideId = body.slideId;
+      const horizontalIndex =
+        typeof body.horizontalIndex === 'number'
+          ? body.horizontalIndex
+          : typeof body.indexh === 'number'
+            ? body.indexh
+            : 0;
+      const verticalIndex =
+        typeof body.verticalIndex === 'number'
+          ? body.verticalIndex
+          : typeof body.indexv === 'number'
+            ? body.indexv
+            : 0;
+      const timestamp =
+        typeof body.timestamp === 'string' ? body.timestamp : new Date().toISOString();
+
       session.currentSlideId = slideId;
 
       if (!session.revealedSlideIds.includes(slideId)) {
@@ -1246,6 +1377,9 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
 
       broadcastRealtimeEvent(sessionId, 'slide.changed', {
         slideId,
+        horizontalIndex,
+        verticalIndex,
+        timestamp,
         revealedSlideIds: session.revealedSlideIds,
       });
 
@@ -1797,6 +1931,14 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         return errorResponse('Origin not allowed', 403);
       }
 
+      const authHeader = request.headers.get('Authorization');
+      const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+      const wsToken =
+        url.searchParams.get('token') ??
+        request.headers.get('x-presenter-token') ??
+        bearerToken ??
+        null;
+
       // For tests or CF Workers WebSocketPair
       const pair = (globalThis as unknown as { WebSocketPair?: new () => [WebSocket, WebSocket] })
         .WebSocketPair;
@@ -1804,7 +1946,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         const [client, server] = new pair();
         (server as unknown as { accept: () => void }).accept?.();
         asDO(env, sessionId)?.acceptWebSocket(server, ['session']);
-        coordinator.handleConnection(server, origin);
+        coordinator.handleConnection(server, origin, wsToken);
         return new Response(null, { status: 101, webSocket: client } as ResponseInit);
       }
 

@@ -361,6 +361,161 @@ describe('RevealAudience Plugin', () => {
 
     plugin.destroy();
   });
+
+  it('registers both ready and slidechanged listeners, handles 2D vertical slides, and keeps keyboard navigation unblocked offline (SPEC-003a)', async () => {
+    const offMock = vi.fn();
+    mockDeck.off = offMock;
+
+    const fetchMock = vi.fn().mockRejectedValue(new Error('Offline'));
+    const plugin = new RevealAudiencePlugin({
+      sessionId: 'session-123',
+      endpoint: 'https://api.agora.test',
+      presenterToken: 'secret-token',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    await plugin.init(mockDeck);
+
+    expect(listeners.ready?.length).toBe(1);
+    expect(listeners.slidechanged?.length).toBe(1);
+
+    // Trigger ready event on a 2D nested vertical slide (h=2, v=3)
+    const verticalSlide = document.createElement('section');
+    verticalSlide.setAttribute('data-slide-id', 'slide-matrix-2-3');
+    verticalSlide.setAttribute('data-title', 'Vertical Sub-Slide');
+
+    listeners.ready?.[0]?.({
+      currentSlide: verticalSlide as unknown as Element,
+      indexh: 2,
+      indexv: 3,
+    });
+
+    expect(plugin.getCurrentSlideMetadata()).toEqual({
+      id: 'slide-matrix-2-3',
+      title: 'Vertical Sub-Slide',
+      horizontalIndex: 2,
+      verticalIndex: 3,
+    });
+
+    // Verify all standard Reveal keyboard navigation keys remain completely unblocked offline
+    for (const key of [
+      'ArrowLeft',
+      'ArrowRight',
+      'ArrowUp',
+      'ArrowDown',
+      ' ',
+      'PageUp',
+      'PageDown',
+    ]) {
+      const navKeyEvt = new MockKeyboardEvent('keydown', { key, cancelable: true });
+      window.dispatchEvent(navKeyEvt as unknown as Event);
+      expect(navKeyEvt.defaultPrevented).toBe(false);
+      expect(navKeyEvt.propagationStopped).toBe(false);
+    }
+
+    plugin.destroy();
+    expect(offMock).toHaveBeenCalledWith('ready', expect.any(Function));
+    expect(offMock).toHaveBeenCalledWith('slidechanged', expect.any(Function));
+  });
+
+  it('establishes authenticated WebSocket, dispatches slide.changed, reconciles out-of-sync position, and auto-reconnects (SPEC-003b)', async () => {
+    vi.useFakeTimers();
+    try {
+      const sentFrames: string[] = [];
+      const wsListeners: Record<string, ((event: unknown) => void)[]> = {};
+      const connectedUrls: string[] = [];
+
+      const createMockWs = (url: string) => {
+        connectedUrls.push(url);
+        return {
+          readyState: 1,
+          send: (data: string) => sentFrames.push(data),
+          close: vi.fn(),
+          addEventListener: (type: string, fn: (event: unknown) => void) => {
+            wsListeners[type] = wsListeners[type] || [];
+            wsListeners[type]?.push(fn);
+          },
+        };
+      };
+
+      const slide0 = document.createElement('section');
+      slide0.setAttribute('data-slide-id', 'slide-intro');
+      slide0.setAttribute('data-index-h', '0');
+      slide0.setAttribute('data-index-v', '0');
+
+      const slide2 = document.createElement('section');
+      slide2.setAttribute('data-slide-id', 'slide-deep-dive');
+      slide2.setAttribute('data-index-h', '2');
+      slide2.setAttribute('data-index-v', '1');
+
+      mockDeck.getSlides = () => [slide0 as unknown as Element, slide2 as unknown as Element];
+      mockDeck.getIndices = (el?: Element) => {
+        if (el === (slide2 as unknown as Element)) return { h: 2, v: 1 };
+        return { h: 0, v: 0 };
+      };
+
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+
+      const plugin = new RevealAudiencePlugin({
+        sessionId: 'session-123',
+        endpoint: 'https://api.agora.test',
+        presenterToken: 'secret-token',
+        reconnectBaseMs: 50,
+        reconnectMaxMs: 200,
+        fetchFn: fetchMock as unknown as typeof fetch,
+        webSocketFactory: createMockWs,
+      });
+
+      await plugin.init(mockDeck);
+
+      expect(connectedUrls[0]).toBe(
+        'wss://api.agora.test/api/v1/sessions/session-123/ws?token=secret-token',
+      );
+
+      // Presenter navigates to (1, 2) -> dispatches slide.changed over WebSocket
+      const navSection = document.createElement('section');
+      navSection.setAttribute('data-slide-id', 'slide-1-2');
+      listeners.slidechanged?.[0]?.({
+        currentSlide: navSection as unknown as Element,
+        indexh: 1,
+        indexv: 2,
+      });
+
+      expect(sentFrames.length).toBe(1);
+      const dispatched = JSON.parse(sentFrames[0]!);
+      expect(dispatched.type).toBe('slide.changed');
+      expect(dispatched.token).toBe('secret-token');
+      expect(dispatched.payload).toMatchObject({
+        slideId: 'slide-1-2',
+        horizontalIndex: 1,
+        verticalIndex: 2,
+      });
+      expect(typeof dispatched.payload.timestamp).toBe('string');
+
+      // Receive authoritative session.state sync message pointing to slide-deep-dive (2, 1)
+      wsListeners.message?.[0]?.({
+        data: JSON.stringify({
+          type: 'session.state',
+          sessionId: 'session-123',
+          payload: {
+            id: 'session-123',
+            currentSlideId: 'slide-deep-dive',
+          },
+        }),
+      });
+
+      expect(mockDeck.slide).toHaveBeenCalledWith(2, 1);
+
+      // Simulate WebSocket disconnect -> triggers auto-reconnect without disrupting presenter
+      wsListeners.close?.[0]?.({});
+      vi.advanceTimersByTime(150);
+      expect(connectedUrls.length).toBe(2);
+
+      plugin.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('QaSlideController and Q&A transitions', () => {

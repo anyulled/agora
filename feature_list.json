@@ -83,17 +83,27 @@
       "title": "Reveal.js plugin",
       "user_visible_behavior": "Reusable RevealAudience plugin attaches to Reveal.js lifecycle, synchronizing slide transitions with the backend. Supports data-slide-id and data-title metadata, respects 2D navigation, and ensures local deck navigation functions offline even if backend fails.",
       "status": "passing",
-      "verification": ["vitest run packages/reveal-plugin/tests/plugin.test.ts"],
+      "verification": [
+        "vitest run packages/reveal-plugin/src/__tests__/reveal-plugin.test.ts",
+        "vitest run tests/integration/worker-api.test.ts"
+      ],
       "evidence": [
         {
           "type": "unit_test",
-          "target": "packages/reveal-plugin/tests/plugin.test.ts",
-          "timestamp": "2026-10-18T20:44:18Z",
+          "target": "packages/reveal-plugin/src/__tests__/reveal-plugin.test.ts",
+          "timestamp": "2026-10-19T00:56:00Z",
           "result": "passed",
-          "assertions": 10
+          "assertions": 31
+        },
+        {
+          "type": "integration_test",
+          "target": "tests/integration/worker-api.test.ts",
+          "timestamp": "2026-10-19T00:56:00Z",
+          "result": "passed",
+          "assertions": 44
         }
       ],
-      "notes": "Offline resilience: network failure does not block keyboard navigation."
+      "notes": "Includes ready and slidechanged lifecycle hooks, 2D coordinate extraction, unblocked offline keyboard navigation, authenticated presenter WebSocket slide.changed dispatch, slide position reconciliation, and server-side unauthorized navigation rejection."
     },
     {
       "id": "SPEC-004",

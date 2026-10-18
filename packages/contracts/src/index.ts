@@ -194,7 +194,8 @@ export type RealtimeEventType =
   | 'wordcloud.submitted'
   | 'wordcloud.updated'
   | 'navigation.suggested'
-  | 'presentation.download.unlocked';
+  | 'presentation.download.unlocked'
+  | 'error';
 
 export interface RealtimeEvent<T = unknown> {
   id: string;

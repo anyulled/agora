@@ -172,3 +172,17 @@
   - `pnpm run lint:openapi`: `✅ OpenAPI 3.1.0 validation passed (24 path(s), 14 schema(s) verified against Worker routes).`
   - `./init.sh` and `pnpm run verify`: 13/13 test suites (134 tests) passing, `1.3%` duplication (`<= 10%`).
 
+---
+
+## Session 011 — 2026-10-19
+- **Role**: Reveal.js Plugin & WebSocket Sync Engineer (`#7 SPEC-003`, `#8 SPEC-003a`, `#9 SPEC-003b`)
+- **Goals**:
+  1. Complete `#8 SPEC-003a`: Register `ready` and `slidechanged` Reveal.js lifecycle listeners with cleanup via `deck.off`, extract `data-slide-id` / `data-title` across 2D nested vertical coordinates (`indexh`, `indexv`), and ensure all keyboard navigation keys (`ArrowLeft`, `ArrowRight`, `ArrowUp`, `ArrowDown`, `Space`, `PageUp`, `PageDown`) remain completely unblocked offline.
+  2. Complete `#9 SPEC-003b` & `#7 SPEC-003`: Establish authenticated presenter WebSocket connection (`buildSessionWebSocketUrl`), dispatch `slide.changed` (`{ slideId, horizontalIndex, verticalIndex, timestamp }`), reconcile out-of-sync presenter slide position (`deck.slide(h, v)`), auto-reconnect on disconnect, preserve previously revealed slide status on backward navigation, and reject unauthenticated WebSocket navigation attempts in `SessionCoordinatorDO`.
+- **Completed**:
+  - Enhanced `RevealAudiencePlugin` in `packages/reveal-plugin/src/index.ts` with `ready`/`slidechanged` listeners, `buildSessionWebSocketUrl`, WebSocket `slide.changed` dispatch, `reconcileSlidePosition`, and exponential backoff WebSocket auto-reconnect.
+  - Updated `SessionCoordinatorDO.handleConnection` and `SessionCoordinatorDO.handleMessage` in `apps/worker/src/index.ts` to validate presenter tokens on WebSocket `slide.changed` dispatches, reject unauthorized attempts with `UNAUTHORIZED_NAVIGATION`, and preserve `revealedSlideIds` on backward navigation.
+  - Added unit and integration test suites in `packages/reveal-plugin/src/__tests__/reveal-plugin.test.ts` and `tests/integration/worker-api.test.ts`.
+- **Verification Evidence**:
+  - `./init.sh` and `pnpm run verify`: 13/13 test suites (137 tests) passing.
+
