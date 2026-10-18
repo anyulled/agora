@@ -211,4 +211,34 @@
 - **Verification Evidence**:
   - `./init.sh` and `pnpm run verify`: 13/13 test suites (143 tests) passing, 0 ESLint warnings, 0 typecheck errors, 1.5% code duplication (`<= 10%`).
 
+---
+
+## Session 013 — 2026-10-19
+- **Role**: Audience Solo Mode & Access Control Engineer (`#11 SPEC-005`)
+- **Goals**:
+  1. Implement `#11 SPEC-005: Solo mode` (Priority 5 in `feature_list.json`):
+     - Audience member can toggle between Follow and Solo mode seamlessly without affecting the speaker.
+     - Solo mode provides Previous and Next controls navigating exclusively through revealed slides in presentation order.
+     - Previously revealed slides remain accessible forever in session even if the speaker backtracks.
+     - Skipped or unvisited slides remain strictly locked and inaccessible.
+     - Returning to Follow mode immediately jumps back to the speaker's active slide.
+     - Advancing speaker in real time updates session state without hijacking or disturbing the solo attendee's active slide.
+     - Audience interactions in Solo mode (questions, emoji reactions, PNG downloads) are properly anchored to the solo-viewed slide.
+     - Backend authoritatively enforces slide revelation access across all interactive and asset APIs (`GET /api/v1/sessions/:id/slides/:slideId`, `GET /api/v1/sessions/:id/slides/:slideId/download`, `POST /api/v1/sessions/:id/questions`, `POST /api/v1/sessions/:id/reactions`, `POST /api/v1/sessions/:id/polls/:pollId/vote`, `POST /api/v1/sessions/:id/wordclouds/:promptId/submit`), rejecting unrevealed slides with `403 Forbidden`.
+- **Completed**:
+  - Added pure domain access controls in `packages/domain/src/index.ts`:
+    - `isSlideRevealed(session, slideId)` and `validateSlideAccess(session, slideId)`.
+    - Enhanced `getSoloNavigableSlides` to strictly sort revealed slides by presentation order (`order`, `horizontalIndex`, `verticalIndex`).
+  - Enhanced `AudienceAppController` in `apps/audience/src/index.ts`:
+    - Added `getSoloNavigableSlides()` returning revealed slides in presentation order.
+    - Added `soloGoToSlide(slideId)` allowing direct jumps to revealed slides while rejecting unrevealed slides.
+    - Ensured `handleRealtimeEvent` updates `revealedSlideIds` and `speakerCurrentSlideId` without hijacking active solo slide positioning when in Solo mode.
+    - Ensured returning to Follow mode (`setMode('follow')`) instantly clears solo position and snaps view back to speaker slide.
+  - Enforced slide revelation access controls across all interactive API routes in `apps/worker/src/index.ts` using `isSlideRevealed`.
+  - Added unit test coverage in `packages/domain/src/__tests__/domain.test.ts` (29 tests), `apps/audience/src/__tests__/audience.test.ts` (25 tests), and full end-to-end integration test in `tests/integration/worker-api.test.ts` (8 tests).
+- **Verification Evidence**:
+  - `pnpm test` and `./init.sh`: 13/13 test suites (150 tests) passing, 0 ESLint warnings, 0 typecheck errors, 1.5% code duplication (`<= 10%`).
+  - `pnpm run harness:victory`: 🏆 Victory Detected (Layer 1, Layer 2, Layer 3 passing).
+
+
 

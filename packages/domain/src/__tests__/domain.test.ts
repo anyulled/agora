@@ -22,6 +22,7 @@ import {
   editPresentationSlide,
   evaluateAdaptiveNavigationRules,
   getSoloNavigableSlides,
+  isSlideRevealed,
   navigatePresenterSlide,
   navigateSoloMode,
   normalizeWordCloudTerm,
@@ -30,6 +31,7 @@ import {
   sortQuestions,
   startScheduledSession,
   toggleQuestionUpvote,
+  validateSlideAccess,
 } from '../index.js';
 
 describe('Domain Logic — SPEC-001 through SPEC-024', () => {
@@ -343,6 +345,19 @@ describe('Domain Logic — SPEC-001 through SPEC-024', () => {
       // Backward from slide-1 clamps to slide-1
       const prev2 = navigateSoloMode(s, sampleSlides, 'slide-1', 'prev');
       expect(prev2?.id).toBe('slide-1');
+    });
+
+    it('validates slide revelation and enforces access controls on revealed slides (SPEC-005)', () => {
+      const session = createLiveSession(samplePresentation, 'sess-100', 'https://agora.live');
+      const s = navigatePresenterSlide(session, sampleSlides, 'slide-1', 'presenter');
+
+      expect(isSlideRevealed(s, 'slide-1')).toBe(true);
+      expect(isSlideRevealed(s, 'slide-2')).toBe(false);
+
+      expect(() => validateSlideAccess(s, 'slide-1')).not.toThrow();
+      expect(() => validateSlideAccess(s, 'slide-2')).toThrow(
+        "Slide 'slide-2' has not been revealed yet in this session",
+      );
     });
   });
 

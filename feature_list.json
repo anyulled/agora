@@ -142,19 +142,34 @@
       "user_visible_behavior": "Audience can switch to Solo mode with Previous/Next controls to browse previously revealed slides in presentation order without affecting the speaker. Skipped slides remain inaccessible. Returning to Follow mode jumps to current speaker slide.",
       "status": "passing",
       "verification": [
-        "vitest run packages/domain/tests/solo-mode.test.ts",
-        "vitest run apps/audience/tests/solo-mode.test.ts"
+        "vitest run packages/domain/src/__tests__/domain.test.ts",
+        "vitest run apps/audience/src/__tests__/audience.test.ts",
+        "vitest run tests/integration/worker-api.test.ts"
       ],
       "evidence": [
         {
           "type": "unit_test",
-          "target": "packages/domain/tests/solo-mode.test.ts",
-          "timestamp": "2026-10-18T20:44:30Z",
+          "target": "packages/domain/src/__tests__/domain.test.ts",
+          "timestamp": "2026-10-19T01:31:20Z",
           "result": "passed",
-          "assertions": 11
+          "assertions": 29
+        },
+        {
+          "type": "unit_test",
+          "target": "apps/audience/src/__tests__/audience.test.ts",
+          "timestamp": "2026-10-19T01:31:20Z",
+          "result": "passed",
+          "assertions": 25
+        },
+        {
+          "type": "integration_test",
+          "target": "tests/integration/worker-api.test.ts",
+          "timestamp": "2026-10-19T01:31:20Z",
+          "result": "passed",
+          "assertions": 8
         }
       ],
-      "notes": "Revealed slides remain accessible forever in session even after speaker backtracking."
+      "notes": "Includes seamless Follow/Solo toggling, Previous/Next navigation over revealed slides in presentation order, locked skipped slides, persistent revealed access despite speaker backtracking, undisturbed solo slide positioning during speaker advance, anchored questions/reactions/downloads, soloGoToSlide, and authoritative server-side 403 Forbidden enforcement."
     },
     {
       "id": "SPEC-006",

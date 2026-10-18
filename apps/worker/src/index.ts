@@ -24,6 +24,7 @@ import {
 import {
   bumpRevision,
   computePresentationRevisionHash,
+  isSlideRevealed,
   startScheduledSession,
 } from '@agora/domain';
 import type {
@@ -1696,6 +1697,10 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         return errorResponse('Poll is closed', 400);
       }
 
+      if (!isSlideRevealed(session, poll.slideId)) {
+        return errorResponse('Slide has not been revealed yet', 403);
+      }
+
       const body = (await request.json().catch(() => ({}))) as { optionId?: string };
       if (!body.optionId || !poll.options.some((o: PollOption) => o.id === body.optionId)) {
         return errorResponse('Valid optionId is required', 400);
@@ -1810,6 +1815,15 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
 
       if (prompt.status !== 'open') {
         return errorResponse('Word cloud prompt is closed', 400);
+      }
+
+      const session = store.sessions.get(sessionId);
+      if (!session) {
+        return errorResponse('Session not found', 404);
+      }
+
+      if (!isSlideRevealed(session, prompt.slideId)) {
+        return errorResponse('Slide has not been revealed yet', 403);
       }
 
       const body = (await request.json().catch(() => ({}))) as { term?: string };

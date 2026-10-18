@@ -484,7 +484,23 @@ export function completeSession(
 }
 
 /**
- * Returns slides that have been revealed, sorted strictly by order (SPEC-005).
+ * Checks whether a given slide has been revealed by the presenter in the session (SPEC-005).
+ */
+export function isSlideRevealed(session: PresentationSession, slideId: string): boolean {
+  return session.revealedSlideIds.includes(slideId);
+}
+
+/**
+ * Asserts that a given slide is revealed, throwing an error if it is inaccessible or locked (SPEC-005).
+ */
+export function validateSlideAccess(session: PresentationSession, slideId: string): void {
+  if (!isSlideRevealed(session, slideId)) {
+    throw new Error(`Slide '${slideId}' has not been revealed yet in this session`);
+  }
+}
+
+/**
+ * Returns slides that have been revealed, sorted strictly by presentation order (SPEC-005).
  */
 export function getSoloNavigableSlides(
   session: PresentationSession,
@@ -492,7 +508,12 @@ export function getSoloNavigableSlides(
 ): SlideMetadata[] {
   return allSlides
     .filter((slide) => session.revealedSlideIds.includes(slide.id))
-    .sort((a, b) => a.order - b.order);
+    .sort(
+      (a, b) =>
+        a.order - b.order ||
+        a.horizontalIndex - b.horizontalIndex ||
+        a.verticalIndex - b.verticalIndex,
+    );
 }
 
 /**

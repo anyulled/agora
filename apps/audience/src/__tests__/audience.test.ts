@@ -390,6 +390,30 @@ describe('AudienceAppController (SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-00
       expect(audience.canNavigateSoloNext()).toBe(false);
     });
 
+    it('returns revealed slides strictly in presentation order via getSoloNavigableSlides()', () => {
+      const soloSlides = audience.getSoloNavigableSlides();
+      expect(soloSlides.map((s) => s.id)).toEqual(['s1', 's2', 's4']);
+      expect(soloSlides.some((s) => s.id === 's3_skipped')).toBe(false);
+    });
+
+    it('allows jumping directly to a revealed slide via soloGoToSlide() while rejecting unrevealed slides', () => {
+      expect(audience.getMode()).toBe('follow');
+
+      // Jumping to revealed s2 switches to solo mode and sets active slide
+      const jumpSuccess = audience.soloGoToSlide('s2');
+      expect(jumpSuccess).toBe(true);
+      expect(audience.getMode()).toBe('solo');
+      expect(audience.getActiveSlideId()).toBe('s2');
+
+      // Attempting to jump to unrevealed slide fails and keeps current solo slide
+      const unrevealedJump = audience.soloGoToSlide('s3_skipped');
+      expect(unrevealedJump).toBe(false);
+      expect(audience.getActiveSlideId()).toBe('s2');
+
+      // Non-existent slide fails
+      expect(audience.soloGoToSlide('non_existent')).toBe(false);
+    });
+
     it('switching to Solo mode does not affect speaker, and returning to Follow immediately snaps to current speaker slide', () => {
       audience.setMode('solo');
       audience.soloPrevious(); // on s2
@@ -414,6 +438,72 @@ describe('AudienceAppController (SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-00
       // In Solo mode, participant is still able to view s4
       expect(audience.getActiveSlideId()).toBe('s4');
       expect(audience.canNavigateSoloPrev()).toBe(true);
+    });
+
+    it('does not hijack the solo attendee slide when speaker advances while attendee is in solo mode', () => {
+      audience.setMode('solo');
+      audience.soloGoToSlide('s1');
+      expect(audience.getActiveSlideId()).toBe('s1');
+
+      // Speaker advances to a new slide in real time via WebSocket event
+      audience.handleRealtimeEvent({
+        id: 'evt-speaker-advance',
+        type: 'slide.changed',
+        sessionId: 'sess_123',
+        timestamp: new Date().toISOString(),
+        payload: {
+          slideId: 's4',
+          horizontalIndex: 3,
+          verticalIndex: 0,
+          revealedSlideIds: ['s1', 's2', 's4'],
+        },
+      });
+
+      // Attendee remains on s1 undisturbed
+      expect(audience.getActiveSlideId()).toBe('s1');
+      expect(audience.getMode()).toBe('solo');
+
+      // Returning to follow mode snaps to the speaker's active slide s4
+      audience.setMode('follow');
+      expect(audience.getActiveSlideId()).toBe('s4');
+    });
+
+    it('anchors questions, emoji reactions, and PNG downloads to the solo-viewed slide (SPEC-005, SPEC-006, SPEC-009, SPEC-014)', () => {
+      audience.setMode('solo');
+      audience.soloGoToSlide('s1');
+
+      // Question submitted in solo mode references s1
+      const q = audience.submitQuestion('Question specifically about slide 1');
+      expect(q.slideId).toBe('s1');
+
+      // Emoji reaction in solo mode targets s1
+      audience.sendReaction('👍');
+      const reactions = audience.getReactionsForActiveSlide();
+      expect(reactions['👍']).toBe(6); // 5 initial + 1 new
+
+      // PNG download url targets s1
+      expect(audience.canDownloadCurrentSlidePng()).toBe(true);
+      expect(audience.getSlidePngDownloadUrl()).toBe(
+        '/api/sessions/sess_123/slides/s1/download-png',
+      );
+    });
+
+    it('renders accessible HTML controls and indicators for Solo mode', () => {
+      audience.setMode('solo');
+      audience.soloGoToSlide('s2');
+
+      const vm = audience.getViewModel();
+      expect(vm.mode).toBe('solo');
+      expect(vm.canNavigateSoloPrev).toBe(true);
+      expect(vm.canNavigateSoloNext).toBe(true);
+      expect(vm.totalRevealedSlides).toBe(3);
+
+      const html = renderAudienceHtml(vm);
+      expect(html).toContain('class="audience-app mode-solo"');
+      expect(html).toContain('aria-label="Solo slide navigation"');
+      expect(html).toContain('data-action="solo-prev"');
+      expect(html).toContain('data-action="solo-next"');
+      expect(html).toContain('Solo Browsing (Slide 2 of 3)');
     });
   });
 

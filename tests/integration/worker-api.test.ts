@@ -829,4 +829,271 @@ describe('Worker HTTP API Integration Tests', () => {
     expect(audience.getActiveSlide()?.title).toBe('Deep Dive');
     expect(audience.getViewModel().positionIndicator).toBe('Slide 2 of 3');
   });
+
+  it('manages Solo mode browsing, locks skipped slides, authorizes revealed slide APIs, and snaps back to Follow (SPEC-005)', async () => {
+    // 1. Setup presentation with 4 slides
+    const presRes = await app.fetch(
+      new Request('https://api.agora.test/api/v1/presentations', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'Solo Mode Verification Deck',
+          endingSlideId: 's-conclusion',
+          slides: [
+            {
+              id: 's-intro',
+              presentationId: 'p-solo',
+              title: 'Introduction',
+              horizontalIndex: 0,
+              verticalIndex: 0,
+              order: 0,
+            },
+            {
+              id: 's-architecture',
+              presentationId: 'p-solo',
+              title: 'Architecture Overview',
+              horizontalIndex: 1,
+              verticalIndex: 0,
+              order: 1,
+            },
+            {
+              id: 's-skipped',
+              presentationId: 'p-solo',
+              title: 'Skipped Feature Branch',
+              horizontalIndex: 2,
+              verticalIndex: 0,
+              order: 2,
+            },
+            {
+              id: 's-conclusion',
+              presentationId: 'p-solo',
+              title: 'Conclusion',
+              horizontalIndex: 3,
+              verticalIndex: 0,
+              order: 3,
+            },
+          ],
+        }),
+      }),
+    );
+    const pres = (await presRes.json()) as Presentation;
+
+    // Upload PNG assets for s-intro and s-architecture
+    await app.fetch(
+      new Request(`https://api.agora.test/api/v1/presentations/${pres.id}/assets?slideId=s-intro`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          kind: 'slide-png',
+          slideId: 's-intro',
+          revision: pres.revision,
+          base64: btoa('png-intro-bytes'),
+        }),
+      }),
+    );
+
+    // 2. Start session
+    const sessRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/presentations/${pres.id}/sessions`, {
+        method: 'POST',
+        headers: adminHeaders,
+      }),
+    );
+    const session = (await sessRes.json()) as PresentationSession & { presenterToken: string };
+    const coordinator = app.getCoordinator(session.id);
+
+    // 3. Attendee joins anonymously
+    const joinRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'SoloExplorer' }),
+      }),
+    );
+    const attendee = (await joinRes.json()) as ParticipantIdentity;
+
+    // 4. Presenter moves to s-architecture
+    coordinator.handleMessage(
+      {} as WebSocket,
+      JSON.stringify({
+        id: 'evt-to-arch',
+        type: 'slide.changed',
+        sessionId: session.id,
+        payload: {
+          slideId: 's-architecture',
+          horizontalIndex: 1,
+          verticalIndex: 0,
+          timestamp: new Date().toISOString(),
+        },
+      }),
+      session.presenterToken,
+    );
+
+    // 5. Presenter skips s-skipped and moves directly to s-conclusion
+    coordinator.handleMessage(
+      {} as WebSocket,
+      JSON.stringify({
+        id: 'evt-to-conclusion',
+        type: 'slide.changed',
+        sessionId: session.id,
+        payload: {
+          slideId: 's-conclusion',
+          horizontalIndex: 3,
+          verticalIndex: 0,
+          timestamp: new Date().toISOString(),
+        },
+      }),
+      session.presenterToken,
+    );
+
+    // 6. Presenter backtracks to s-architecture
+    coordinator.handleMessage(
+      {} as WebSocket,
+      JSON.stringify({
+        id: 'evt-backtrack',
+        type: 'slide.changed',
+        sessionId: session.id,
+        payload: {
+          slideId: 's-architecture',
+          horizontalIndex: 1,
+          verticalIndex: 0,
+          timestamp: new Date().toISOString(),
+        },
+      }),
+      session.presenterToken,
+    );
+
+    const liveSessionState = app.store.sessions.get(session.id)!;
+    expect(liveSessionState.currentSlideId).toBe('s-architecture');
+    // s-conclusion remains in revealedSlideIds even after backtracking!
+    expect(liveSessionState.revealedSlideIds).toContain('s-intro');
+    expect(liveSessionState.revealedSlideIds).toContain('s-architecture');
+    expect(liveSessionState.revealedSlideIds).toContain('s-conclusion');
+    // s-skipped was never visited, so it is strictly absent
+    expect(liveSessionState.revealedSlideIds).not.toContain('s-skipped');
+
+    // 7. Attendee client setup
+    const safeViewRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}`),
+    );
+    const safeView = (await safeViewRes.json()) as AudienceSafeSessionView;
+    const audienceClient = new AudienceAppController(session.id, attendee);
+    audienceClient.syncSessionView(safeView);
+
+    // In Follow mode, tracks speaker
+    expect(audienceClient.isFollowing()).toBe(true);
+    expect(audienceClient.getActiveSlideId()).toBe('s-architecture');
+
+    // Toggle to Solo mode
+    audienceClient.setMode('solo');
+    expect(audienceClient.getMode()).toBe('solo');
+    expect(audienceClient.isFollowing()).toBe(false);
+
+    // Solo previous goes to s-intro
+    expect(audienceClient.canNavigateSoloPrev()).toBe(true);
+    audienceClient.soloPrevious();
+    expect(audienceClient.getActiveSlideId()).toBe('s-intro');
+
+    // Solo next goes to s-architecture and then s-conclusion, skipping s-skipped completely
+    expect(audienceClient.canNavigateSoloNext()).toBe(true);
+    audienceClient.soloNext();
+    expect(audienceClient.getActiveSlideId()).toBe('s-architecture');
+    audienceClient.soloNext();
+    expect(audienceClient.getActiveSlideId()).toBe('s-conclusion');
+    expect(audienceClient.canNavigateSoloNext()).toBe(false);
+
+    // 8. Server-side authoritative validation: revealed slides succeed, unrevealed slide fails
+    // Valid slide detail
+    const revealedSlideRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/slides/s-intro`),
+    );
+    expect(revealedSlideRes.status).toBe(200);
+
+    // Valid PNG download for revealed slide
+    const revealedPngRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/slides/s-intro/download`),
+    );
+    expect(revealedPngRes.status).toBe(200);
+
+    // Valid question submission on revealed slide
+    const questionRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${attendee.token}`,
+        },
+        body: JSON.stringify({
+          slideId: 's-intro',
+          content: 'Does Solo mode work on intro slides?',
+        }),
+      }),
+    );
+    expect(questionRes.status).toBe(201);
+
+    // Valid reaction on revealed slide
+    const reactionRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/reactions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${attendee.token}`,
+        },
+        body: JSON.stringify({
+          slideId: 's-intro',
+          reaction: '❤️',
+        }),
+      }),
+    );
+    expect(reactionRes.status).toBe(200);
+
+    // Attempting access/download/question/reaction on unrevealed s-skipped returns 403 Forbidden
+    const unrevealedDetailRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/slides/s-skipped`),
+    );
+    expect(unrevealedDetailRes.status).toBe(403);
+
+    const unrevealedPngRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/slides/s-skipped/download`),
+    );
+    expect(unrevealedPngRes.status).toBe(403);
+
+    const unrevealedQuestionRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${attendee.token}`,
+        },
+        body: JSON.stringify({
+          slideId: 's-skipped',
+          content: 'Can I ask about a locked slide?',
+        }),
+      }),
+    );
+    expect(unrevealedQuestionRes.status).toBe(403);
+
+    const unrevealedReactionRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/reactions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${attendee.token}`,
+        },
+        body: JSON.stringify({
+          slideId: 's-skipped',
+          reaction: '🤔',
+        }),
+      }),
+    );
+    expect(unrevealedReactionRes.status).toBe(403);
+
+    // 9. Toggling back to Follow immediately snaps to the speaker's current slide (s-architecture)
+    audienceClient.setMode('follow');
+    expect(audienceClient.isFollowing()).toBe(true);
+    expect(audienceClient.getActiveSlideId()).toBe('s-architecture');
+
+    // 10. Confirm speaker and session remain unaffected
+    expect(app.store.sessions.get(session.id)?.currentSlideId).toBe('s-architecture');
+  });
 });

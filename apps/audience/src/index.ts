@@ -214,6 +214,9 @@ export class AudienceAppController {
               this.revealedSlideIds.add(id);
             }
           }
+          if (this.mode === 'solo' && !this.soloCurrentSlideId) {
+            this.soloCurrentSlideId = payload.slideId;
+          }
           this.notifyListeners();
         }
         break;
@@ -247,6 +250,14 @@ export class AudienceAppController {
         }
         if (typeof payload.pdfDownloadUnlocked === 'boolean') {
           this.pdfDownloadUnlocked = payload.pdfDownloadUnlocked;
+        }
+        if (this.mode === 'solo' && !this.soloCurrentSlideId && this.speakerCurrentSlideId) {
+          if (this.revealedSlideIds.has(this.speakerCurrentSlideId)) {
+            this.soloCurrentSlideId = this.speakerCurrentSlideId;
+          } else {
+            const revealed = this.getRevealedSlidesInOrder();
+            this.soloCurrentSlideId = revealed[0]?.id ?? null;
+          }
         }
         this.notifyListeners();
         break;
@@ -482,7 +493,34 @@ export class AudienceAppController {
 
   // Navigation helpers for Solo mode
   private getRevealedSlidesInOrder(): SlideMetadata[] {
-    return this.slides.filter((s) => this.revealedSlideIds.has(s.id));
+    return this.slides
+      .filter((s) => this.revealedSlideIds.has(s.id))
+      .sort(
+        (a, b) =>
+          a.order - b.order ||
+          a.horizontalIndex - b.horizontalIndex ||
+          a.verticalIndex - b.verticalIndex,
+      );
+  }
+
+  // Returns all revealed slides in authoritative presentation order (SPEC-005)
+  getSoloNavigableSlides(): SlideMetadata[] {
+    return this.getRevealedSlidesInOrder();
+  }
+
+  // Jump to a specific revealed slide in Solo mode (SPEC-005)
+  soloGoToSlide(slideId: string): boolean {
+    if (!this.revealedSlideIds.has(slideId)) {
+      return false;
+    }
+    const target = this.slides.find((s) => s.id === slideId);
+    if (!target) {
+      return false;
+    }
+    this.mode = 'solo';
+    this.soloCurrentSlideId = slideId;
+    this.notifyListeners();
+    return true;
   }
 
   getActiveSlideId(): string | null {
