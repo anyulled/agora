@@ -55,29 +55,29 @@ export function normalizeWordCloudTerm(input: string): string {
 }
 
 export class InMemoryAgoraStore {
-  public presentations: Map<string, Presentation> = new Map();
-  public slides: Map<string, SlideMetadata[]> = new Map();
-  public navigationRules: Map<string, NavigationRule[]> = new Map();
-  public assets: Map<string, AssetManifestEntry[]> = new Map();
-  public assetBlobs: Map<string, { bytes: Uint8Array; contentType: string }> = new Map();
+  public presentations = new Map<string, Presentation>();
+  public slides = new Map<string, SlideMetadata[]>();
+  public navigationRules = new Map<string, NavigationRule[]>();
+  public assets = new Map<string, AssetManifestEntry[]>();
+  public assetBlobs = new Map<string, { bytes: Uint8Array; contentType: string }>();
 
-  public sessions: Map<string, PresentationSession> = new Map();
-  public participants: Map<string, ParticipantIdentity> = new Map();
-  public participantTokens: Map<string, string> = new Map(); // token -> participantId
-  public presenterTokens: Map<string, string> = new Map(); // sessionId -> presenterToken
+  public sessions = new Map<string, PresentationSession>();
+  public participants = new Map<string, ParticipantIdentity>();
+  public participantTokens = new Map<string, string>(); // token -> participantId
+  public presenterTokens = new Map<string, string>(); // sessionId -> presenterToken
 
-  public questions: Map<string, AudienceQuestion[]> = new Map(); // sessionId -> questions
-  public questionUpvotes: Map<string, Set<string>> = new Map(); // questionId -> Set<participantId>
-  public reactions: Map<string, Map<string, ReactionCounts>> = new Map(); // sessionId -> slideId -> counts
-  public polls: Map<string, PollDefinition[]> = new Map(); // sessionId -> polls
-  public pollVotes: Map<string, Map<string, string>> = new Map(); // pollId -> participantId -> optionId
-  public wordClouds: Map<string, WordCloudPrompt[]> = new Map(); // sessionId -> prompts
-  public wordCloudSubmissions: Map<string, { participantId: string; term: string }[]> = new Map(); // promptId -> submissions
-  public processedEvents: Map<string, Set<string>> = new Map(); // sessionId -> Set<eventId>
+  public questions = new Map<string, AudienceQuestion[]>(); // sessionId -> questions
+  public questionUpvotes = new Map<string, Set<string>>(); // questionId -> Set<participantId>
+  public reactions = new Map<string, Map<string, ReactionCounts>>(); // sessionId -> slideId -> counts
+  public polls = new Map<string, PollDefinition[]>(); // sessionId -> polls
+  public pollVotes = new Map<string, Map<string, string>>(); // pollId -> participantId -> optionId
+  public wordClouds = new Map<string, WordCloudPrompt[]>(); // sessionId -> prompts
+  public wordCloudSubmissions = new Map<string, { participantId: string; term: string }[]>(); // promptId -> submissions
+  public processedEvents = new Map<string, Set<string>>(); // sessionId -> Set<eventId>
 }
 
 export class SessionCoordinatorDO {
-  private sockets: Set<WebSocket> = new Set();
+  private sockets = new Set<WebSocket>();
   private store: InMemoryAgoraStore;
   private sessionId: string;
   private allowedOrigins: string[];
@@ -144,7 +144,7 @@ export class SessionCoordinatorDO {
 export const SessionDurableObject = SessionCoordinatorDO;
 
 class RateLimiter {
-  private records: Map<string, number[]> = new Map();
+  private records = new Map<string, number[]>();
 
   public check(key: string, limit: number, windowMs: number): boolean {
     const now = Date.now();
@@ -182,7 +182,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
 
   const store = new InMemoryAgoraStore();
   const rateLimiter = new RateLimiter();
-  const coordinators: Map<string, SessionCoordinatorDO> = new Map();
+  const coordinators = new Map<string, SessionCoordinatorDO>();
 
   function getCoordinator(sessionId: string): SessionCoordinatorDO {
     let coord = coordinators.get(sessionId);

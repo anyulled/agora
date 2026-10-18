@@ -7,27 +7,26 @@
 - Root harness router `AGENTS.md` is active and adheres to the <120 line constraint (57 lines).
 - All 24 specifications (`SPEC-001` through `SPEC-024`) are implemented across `packages/{contracts,domain,application,reveal-plugin,slide-export}` and `apps/{admin,audience,presenter,worker}` and tracked as GitHub issues & sub-issues on `anyulled/agora`.
 - Local Cloudflare services emulation (`LocalD1Database`, `LocalR2Bucket`, `LocalDurableObjectNamespace` / `ctx.storage.sql` backed by `node:sqlite` and local filesystem persistence) is active and verified via `pnpm run cf:emulate` and `tests/integration/cloudflare-emulation.test.ts`.
-- Conventional Commits (`commitlint.config.mjs`, `harness/verify-commit-msg.mjs`) and rapid-feedback Git hooks (`.githooks/pre-commit`, `.githooks/commit-msg`) are active and enforced locally and in CI.
+- Conventional Commits (`commitlint.config.mjs`, `harness/verify-commit-msg.mjs`), ESLint 9 strict flat configuration (`eslint.config.mjs`), Biome formatting/linting (`biome.json`), and rapid-feedback Git hooks (`.githooks/pre-commit`, `.githooks/commit-msg`) are active and enforced locally and in CI.
 
 ## Changed This Session
-- Implemented `apps/worker/src/cloudflare-emulator.ts` providing local Cloudflare D1, R2, and SQLite Durable Object emulation with disk persistence.
-- Wired `apps/worker/src/index.ts` to hydrate and persist through emulated Cloudflare bindings (`createLocalCloudflareEnv`).
-- Added `infrastructure/cloudflare/migrations/0001_initial.sql`, `infrastructure/cloudflare/local-emulate-check.mjs` (`pnpm run cf:emulate`), and `tests/integration/cloudflare-emulation.test.ts`.
-- Updated `AGENTS.md`, `init.sh`, `package.json`, and `claude-progress.md`.
+- Added `eslint.config.mjs` enforcing `@eslint/js` recommended, `typescript-eslint` `strict` + `stylistic` rules, and Clean Architecture `no-restricted-imports` boundaries on `packages/domain` and `packages/application`.
+- Wired `eslint . --max-warnings=0` (`pnpm run lint:eslint`) into `package.json`, `init.sh`, `.githooks/pre-commit`, `.github/workflows/ci.yml`, `harness/validate-harness.mjs`, and `harness/victory-detector.mjs`.
+- Updated `README.md` with the Ancient Greek title (`# 🏛️ Ἀγορά · ΑΓΟΡΑ (Ágora)`) and 35 badges (including SonarCloud/SonarQube, ESLint 9 Flat Config, CI/CD, and Harness Engineering).
 
 ## Broken Or Unverified
-- None. All local checks, Cloudflare emulation tests, and GitHub Actions CI/CD workflows are green.
+- None. All local checks, ESLint/Biome linters, Cloudflare emulation tests, and GitHub Actions CI/CD workflows are green.
 
 ## Next Best Step
-1. Run `./init.sh` and `pnpm run cf:emulate` to verify local Cloudflare bindings before any new work.
+1. Run `./init.sh` and `pnpm run verify` to verify all linters, local Cloudflare bindings, and test suites before any new work.
 
 ## Reproducer & Verification Commands
 ```bash
-# 1. Canonical baseline verification (includes harness, arch, commitlint, cf:emulate, typecheck, tests)
+# 1. Canonical baseline verification (includes harness, arch, commitlint, cf:emulate, eslint, typecheck, tests)
 ./init.sh
 
-# 2. Run local Cloudflare D1 + R2 + Durable Object SQLite emulation smoke check
-pnpm run cf:emulate
+# 2. Run ESLint 9 strict flat configuration check
+pnpm run lint:eslint
 
 # 3. Full verification gate
 pnpm run verify

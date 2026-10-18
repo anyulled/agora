@@ -77,5 +77,16 @@
 - **Verification Evidence**:
   - `./init.sh` and `pnpm run verify`: 13/13 test suites (128 tests) passing, 0 lint/typecheck errors.
 
+---
 
-
+## Session 005 — 2026-10-18
+- **Role**: ESLint 9 Flat Config & Clean Architecture Guardrail Engineer (`flash_lite`)
+- **Goals**:
+  1. Add a robust ESLint 9 flat configuration (`eslint.config.mjs`) with `@eslint/js` recommended, `typescript-eslint` `strict` and `stylistic` presets, and Clean Architecture `no-restricted-imports` rules for `packages/domain` and `packages/application`.
+  2. Integrate `eslint . --max-warnings=0` into `pnpm run lint`, `pnpm run check`, `.githooks/pre-commit`, `init.sh`, and `.github/workflows/ci.yml`.
+  3. Enforce `eslint.config.mjs` in `harness/validate-harness.mjs` and `harness/victory-detector.mjs`.
+- **Completed**:
+  - Created `eslint.config.mjs` and fixed all 38 strict/stylistic lint findings across the workspace (`consistent-generic-constructors`, `no-this-alias`, `no-useless-escape`, `prefer-for-of`).
+  - Added ESLint verification test in `tests/integration/commitlint.test.ts` and ESLint badge in `README.md`.
+- **Verification Evidence**:
+  - `pnpm run lint:eslint`, `./init.sh`, and `pnpm run verify`: 13/13 test suites (129 tests) passing, 0 ESLint/Biome/typecheck warnings or errors.

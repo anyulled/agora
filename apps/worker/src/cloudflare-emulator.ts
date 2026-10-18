@@ -116,13 +116,13 @@ export interface LocalR2ObjectBody {
 export class LocalR2Bucket {
   private persistDir?: string;
   private bucketDir: string;
-  private memoryStore: Map<
+  private memoryStore = new Map<
     string,
     {
       data: Uint8Array;
       meta: { key: string; size: number; etag: string; httpMetadata?: { contentType?: string } };
     }
-  > = new Map();
+  >();
 
   constructor(persistDir?: string) {
     this.persistDir = persistDir;
@@ -306,7 +306,8 @@ export class LocalSqlStorage {
       this.rowsRead += rows.length;
     }
 
-    const self = this;
+    const currentRowsRead = this.rowsRead;
+    const currentRowsWritten = this.rowsWritten;
     return {
       toArray() {
         return rows;
@@ -314,12 +315,8 @@ export class LocalSqlStorage {
       one() {
         return rows[0] as T;
       },
-      get rowsRead() {
-        return self.rowsRead;
-      },
-      get rowsWritten() {
-        return self.rowsWritten;
-      },
+      rowsRead: currentRowsRead,
+      rowsWritten: currentRowsWritten,
     };
   }
 }
@@ -332,9 +329,9 @@ export class LocalDurableObjectState {
     put<T>(key: string, val: T): Promise<void>;
     delete(key: string): Promise<boolean>;
   };
-  private websockets: Set<WebSocket> = new Set();
-  private wsTags: Map<WebSocket, string[]> = new Map();
-  private kvStore: Map<string, unknown> = new Map();
+  private websockets = new Set<WebSocket>();
+  private wsTags = new Map<WebSocket, string[]>();
+  private kvStore = new Map<string, unknown>();
   private db: DatabaseSync;
 
   constructor(id: { toString(): string; name?: string }, db: DatabaseSync) {
@@ -388,8 +385,8 @@ export class LocalDurableObjectState {
 export class LocalDurableObjectNamespace {
   private persistDir?: string;
   private doDir: string;
-  private states: Map<string, LocalDurableObjectState> = new Map();
-  private dbs: Map<string, DatabaseSync> = new Map();
+  private states = new Map<string, LocalDurableObjectState>();
+  private dbs = new Map<string, DatabaseSync>();
 
   constructor(persistDir?: string) {
     this.persistDir = persistDir;

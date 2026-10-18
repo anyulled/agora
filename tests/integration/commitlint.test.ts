@@ -62,4 +62,18 @@ describe('Commit Message Validation', () => {
     expect(commitMsgContent.length).toBeGreaterThan(0);
     expect(preCommitContent.length).toBeGreaterThan(0);
   });
+
+  it('verifies robust ESLint 9 flat configuration and Clean Architecture boundary rules exist', () => {
+    const root = path.resolve(import.meta.dirname, '../..');
+    const eslintConfigPath = path.join(root, 'eslint.config.mjs');
+
+    expect(fs.existsSync(eslintConfigPath)).toBe(true);
+    const eslintContent = fs.readFileSync(eslintConfigPath, 'utf8');
+
+    expect(eslintContent).toContain('tseslint.configs.strict');
+    expect(eslintContent).toContain('tseslint.configs.stylistic');
+    expect(eslintContent).toContain('no-restricted-imports');
+    expect(eslintContent).toContain('packages/domain/**/*.ts');
+    expect(eslintContent).toContain('packages/application/**/*.ts');
+  });
 });

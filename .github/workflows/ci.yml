@@ -33,7 +33,7 @@ jobs:
       - name: Check code formatting
         run: pnpm run format:check
 
-      - name: Run Biome lint & harness guardrails
+      - name: Run Biome, ESLint & harness guardrails
         run: pnpm run lint
 
       - name: Verify Conventional Commit message

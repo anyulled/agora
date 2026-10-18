@@ -41,6 +41,7 @@ const layer1Files = [
   'pnpm-workspace.yaml',
   'tsconfig.json',
   'biome.json',
+  'eslint.config.mjs',
   'SPECIFICATION.md',
   'ARCHITECTURE.md',
   'AGENTS.md',

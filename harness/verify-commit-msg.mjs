@@ -16,7 +16,7 @@ const TYPES = [
 ];
 
 const COMMIT_RE =
-  /^(?<type>feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\((?<scope>[^\)]+)\))?(?<breaking>!)?:\s+(?<subject>.+)$/;
+  /^(?<type>feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\((?<scope>[^)]+)\))?(?<breaking>!)?:\s+(?<subject>.+)$/;
 
 export function validateCommitMessage(rawMessage) {
   const errors = [];

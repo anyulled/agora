@@ -43,8 +43,9 @@ if git rev-parse --verify HEAD >/dev/null 2>&1; then
 fi
 node infrastructure/cloudflare/local-emulate-check.mjs
 
-# 4. Strict Typecheck
-echo "--> [4/6] Running TypeScript typecheck..."
+# 4. Strict Typecheck & ESLint
+echo "--> [4/6] Running ESLint & TypeScript typecheck..."
+pnpm run lint:eslint
 pnpm run typecheck
 
 # 5. Automated Test Suite

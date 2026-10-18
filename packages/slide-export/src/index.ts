@@ -89,9 +89,9 @@ export class BrowserDomSlideRenderer implements SlideRenderer {
   }
 
   public forceFinalFragmentState(element: HTMLElement): void {
-    const fragments = element.querySelectorAll?.('.fragment') ?? [];
-    for (let i = 0; i < fragments.length; i++) {
-      const fragment = fragments[i] as HTMLElement;
+    const fragments = Array.from(element.querySelectorAll?.('.fragment') ?? []);
+    for (const rawFragment of fragments) {
+      const fragment = rawFragment as HTMLElement;
       if (fragment.classList) {
         fragment.classList.add('visible');
       }

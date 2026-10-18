@@ -93,9 +93,9 @@ export interface AdminDashboardViewModel {
 }
 
 export class AdminAppController {
-  private presentations: Map<string, Presentation> = new Map();
-  private manifests: Map<string, AssetManifest> = new Map();
-  private activeSessions: Map<string, PresentationSession> = new Map();
+  private presentations = new Map<string, Presentation>();
+  private manifests = new Map<string, AssetManifest>();
+  private activeSessions = new Map<string, PresentationSession>();
   private deleteModalState: DeleteModalState = {
     isOpen: false,
     presentationId: null,

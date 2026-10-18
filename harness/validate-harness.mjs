@@ -37,6 +37,7 @@ const requiredSubsystemFiles = [
   'claude-progress.md',
   'session-handoff.md',
   // Subsystem 5: Mechanical Linters, Git Hooks & Guardrails
+  'eslint.config.mjs',
   'commitlint.config.mjs',
   'harness/validate-harness.mjs',
   'harness/verify-architecture.mjs',

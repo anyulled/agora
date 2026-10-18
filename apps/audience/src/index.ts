@@ -41,8 +41,8 @@ export class AudienceAppController {
 
   // Session safe view data
   private slides: SlideMetadata[] = [];
-  private revealedSlideIds: Set<string> = new Set();
-  private availablePngSlideIds: Set<string> = new Set();
+  private revealedSlideIds = new Set<string>();
+  private availablePngSlideIds = new Set<string>();
   private pdfAvailable = false;
   private pdfDownloadUnlocked = false;
   private speakerCurrentSlideId: string | null = null;
@@ -52,9 +52,9 @@ export class AudienceAppController {
   private questions: AudienceQuestion[] = [];
   private polls: PollResultsSummary[] = [];
   private wordClouds: WordCloudAggregate[] = [];
-  private reactionsBySlide: Map<string, ReactionCounts> = new Map();
-  private participantVotesByPollId: Map<string, string[]> = new Map();
-  private participantWordSubmissions: Map<string, Set<string>> = new Map();
+  private reactionsBySlide = new Map<string, ReactionCounts>();
+  private participantVotesByPollId = new Map<string, string[]>();
+  private participantWordSubmissions = new Map<string, Set<string>>();
 
   constructor(sessionId: string, initialIdentity?: ParticipantIdentity) {
     this.sessionId = sessionId;

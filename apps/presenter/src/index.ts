@@ -62,7 +62,7 @@ export class PresenterAppController {
   private currentVerticalIndex = 0;
 
   // Real-time HUD data
-  private reactionsBySlide: Map<string, ReactionCounts> = new Map();
+  private reactionsBySlide = new Map<string, ReactionCounts>();
   private questions: AudienceQuestion[] = [];
   private activeSuggestion: NavigationSuggestion | null = null;
 
