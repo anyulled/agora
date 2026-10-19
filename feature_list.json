@@ -393,6 +393,47 @@
           "timestamp": "2026-10-19T12:59:28Z",
           "result": "passed",
           "assertions": 203
+        },
+        {
+          "type": "verification",
+          "target": "PR #48 poll lifecycle consolidation",
+          "timestamp": "2026-10-19T15:20:00Z",
+          "result": "passed",
+          "assertions": 203
+        },
+        {
+          "type": "verification",
+          "target": "pnpm run verify (six stages: format:check, lint, typecheck, build, test, victory detector)",
+          "timestamp": "2026-10-19T13:37:02.981Z",
+          "result": "passed",
+          "assertions": 205,
+          "stageResults": [
+            {
+              "command": "pnpm run format:check",
+              "exitStatus": 0
+            },
+            {
+              "command": "pnpm run lint",
+              "exitStatus": 0
+            },
+            {
+              "command": "pnpm run typecheck",
+              "exitStatus": 0
+            },
+            {
+              "command": "pnpm run build",
+              "exitStatus": 0
+            },
+            {
+              "command": "pnpm run test",
+              "exitStatus": 0,
+              "tests": 205
+            },
+            {
+              "command": "node harness/victory-detector.mjs",
+              "exitStatus": 0
+            }
+          ]
         }
       ],
       "notes": "Enforces strict participant voting constraints server-side."

@@ -34,25 +34,49 @@ export function safeUrlAttribute(value: string | null, allowImageData = false): 
   return '#';
 }
 
-export function stripHtmlFromText(input: string): string {
-  const decoded = input
-    .replace(/&lt;|&#0*60;|&#x0*3c;/gi, '<')
-    .replace(/&gt;|&#0*62;|&#x0*3e;/gi, '>');
+function decodeAngleBracketEntities(input: string): string {
+  return input.replace(/&lt;|&#0*60;|&#x0*3c;/gi, '<').replace(/&gt;|&#0*62;|&#x0*3e;/gi, '>');
+}
+
+function findClosingTagEnd(input: string, start: number, name: string): number {
+  const closePrefix = `</${name}`;
+  for (let candidate = start; candidate <= input.length - closePrefix.length; candidate++) {
+    if (input.slice(candidate, candidate + closePrefix.length).toLowerCase() !== closePrefix) {
+      continue;
+    }
+    const boundary = input[candidate + closePrefix.length];
+    if (
+      boundary === '>' ||
+      boundary === '/' ||
+      boundary === ' ' ||
+      boundary === '\t' ||
+      boundary === '\n' ||
+      boundary === '\r'
+    ) {
+      let closeEnd = candidate + name.length + 2;
+      while (closeEnd < input.length && input[closeEnd] !== '>') closeEnd++;
+      return closeEnd < input.length ? closeEnd + 1 : input.length;
+    }
+  }
+  return -1;
+}
+
+function removeMarkupAndActiveContent(input: string): string {
   let output = '';
   let index = 0;
-  while (index < decoded.length) {
-    if (decoded[index] !== '<') {
-      output += decoded[index++];
+  while (index < input.length) {
+    if (input[index] !== '<') {
+      output += input[index++];
       continue;
     }
     const tagStart = index;
     let cursor = index + 1;
-    while (cursor < decoded.length && decoded[cursor] !== '>') cursor++;
-    if (cursor === decoded.length) {
-      output += decoded.slice(tagStart);
+    while (cursor < input.length && input[cursor] !== '>') cursor++;
+    if (cursor === input.length) {
+      output += input.slice(tagStart);
       break;
     }
-    const tag = decoded.slice(tagStart + 1, cursor).trim();
+    const tag = input.slice(tagStart + 1, cursor).trim();
     const closing = tag.startsWith('/');
     const name = tag
       .replace(/^\//, '')
@@ -60,45 +84,28 @@ export function stripHtmlFromText(input: string): string {
       ?.toLowerCase();
     index = cursor + 1;
     if (!closing && (name === 'script' || name === 'style')) {
-      const closePrefix = `</${name}`;
-      let closeStart = -1;
-      for (let candidate = index; candidate <= decoded.length - closePrefix.length; candidate++) {
-        if (
-          decoded.slice(candidate, candidate + closePrefix.length).toLowerCase() !== closePrefix
-        ) {
-          continue;
-        }
-        const boundary = decoded[candidate + closePrefix.length];
-        if (
-          boundary === '>' ||
-          boundary === '/' ||
-          boundary === ' ' ||
-          boundary === '\t' ||
-          boundary === '\n' ||
-          boundary === '\r'
-        ) {
-          closeStart = candidate;
-          break;
-        }
-      }
-      if (closeStart < 0) break;
-      let closeEnd = closeStart + name.length + 2;
-      while (closeEnd < decoded.length && decoded[closeEnd] !== '>') closeEnd++;
-      index = closeEnd < decoded.length ? closeEnd + 1 : decoded.length;
+      const closeEnd = findClosingTagEnd(input, index, name);
+      if (closeEnd < 0) break;
+      index = closeEnd;
     }
   }
-  let safeText = '';
-  for (let cursor = 0; cursor < output.length; ) {
-    const javascriptScheme = output.slice(cursor, cursor + 11).toLowerCase();
-    const vbscriptScheme = output.slice(cursor, cursor + 9).toLowerCase();
-    if (javascriptScheme === 'javascript:') {
-      cursor += 'javascript:'.length;
-    } else if (vbscriptScheme === 'vbscript:') {
-      cursor += 'vbscript:'.length;
-    } else {
-      safeText += output[cursor++];
-    }
+  return output;
+}
+
+function removeActiveSchemes(input: string): string {
+  let current = input;
+  let previous = '';
+  while (current !== previous) {
+    previous = current;
+    current = current.replace(/javascript:|vbscript:/gi, '');
   }
+  return current;
+}
+
+export function stripHtmlFromText(input: string): string {
+  const decoded = decodeAngleBracketEntities(input);
+  const text = removeMarkupAndActiveContent(decoded);
+  const safeText = removeActiveSchemes(text);
   return safeText.replace(/[<>]/g, '').trim();
 }
 

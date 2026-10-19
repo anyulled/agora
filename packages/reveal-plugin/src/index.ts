@@ -1,9 +1,9 @@
 import {
-  processPollRealtimeEvent,
   type AudienceQuestion,
   type PollDefinition,
   type PollResultsSummary,
   type WebSocketLike,
+  processPollRealtimeEvent,
 } from '@agora/contracts';
 
 export type { WebSocketLike };
@@ -790,7 +790,7 @@ export class PollSlideController {
     this.pollResults.set(summary.pollId, { ...summary });
     const target = this.polls.find((p) => p.id === summary.pollId);
     if (target) {
-      target.resultsRevealed = true;
+      target.resultsRevealed = summary.resultsRevealed;
     }
     this.render();
   }
@@ -832,6 +832,28 @@ export class PollSlideController {
         const polls = (await response.json()) as PollDefinition[];
         if (Array.isArray(polls)) {
           this.polls = polls;
+          if (this.options?.presenterToken) {
+            try {
+              const stateResponse = await fetchImplementation(
+                `${base}/api/v1/sessions/${encodeURIComponent(this.sessionId)}`,
+                { headers: { Authorization: `Bearer ${this.options.presenterToken}` } },
+              );
+              if (stateResponse.ok) {
+                const state = (await stateResponse.json()) as {
+                  activePolls?: PollResultsSummary[];
+                };
+                if (Array.isArray(state.activePolls)) {
+                  for (const summary of state.activePolls) {
+                    this.pollResults.set(summary.pollId, { ...summary });
+                    const poll = this.polls.find((item) => item.id === summary.pollId);
+                    if (poll) poll.resultsRevealed = summary.resultsRevealed;
+                  }
+                }
+              }
+            } catch {
+              // Keep poll definitions if authoritative summaries are temporarily unavailable.
+            }
+          }
           this.render();
         }
       }

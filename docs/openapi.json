@@ -1504,16 +1504,23 @@
                     "type": "array",
                     "items": {
                       "type": "object",
-                      "required": ["id", "label"],
+                      "required": ["id"],
                       "properties": {
                         "id": {
                           "type": "string"
                         },
                         "label": {
                           "type": "string"
+                        },
+                        "text": {
+                          "type": "string"
                         }
                       }
                     }
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["draft", "open"]
                   }
                 }
               }
@@ -2554,7 +2561,7 @@
           },
           "status": {
             "type": "string",
-            "enum": ["draft", "open", "closed"]
+            "enum": ["draft", "open", "closed", "revealed"]
           },
           "resultsRevealed": {
             "type": "boolean"
@@ -2563,7 +2570,16 @@
       },
       "PollResultsSummary": {
         "type": "object",
-        "required": ["pollId", "slideId", "status", "totalResponses", "countsByOptionId"],
+        "required": [
+          "pollId",
+          "slideId",
+          "status",
+          "totalResponses",
+          "countsByOptionId",
+          "question",
+          "type",
+          "options"
+        ],
         "properties": {
           "pollId": {
             "type": "string"

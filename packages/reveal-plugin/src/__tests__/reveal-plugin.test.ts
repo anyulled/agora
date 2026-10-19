@@ -1,3 +1,4 @@
+import type { PollDefinition } from '@agora/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   PollSlideController,
@@ -33,6 +34,17 @@ class MockElement {
 
   public getAttribute(name: string): string | null {
     return this.attributes[name] ?? null;
+  }
+
+  public get dataset(): Record<string, string> {
+    return Object.fromEntries(
+      Object.entries(this.attributes)
+        .filter(([name]) => name.startsWith('data-'))
+        .map(([name, value]) => [
+          name.slice(5).replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase()),
+          value,
+        ]),
+    );
   }
 
   public appendChild(child: MockElement): MockElement {
@@ -967,10 +979,31 @@ describe('QaSlideController and Q&A transitions', () => {
       expect(container.querySelector('.poll-status-tag')?.textContent).toBe('CLOSED');
     });
 
-    it('mounts PollSlideController automatically on RevealAudiencePlugin slide change', async () => {
-      const fetchMock = vi.fn().mockImplementation(async () => ({
+    it('mounts and renders the slide poll after RevealAudiencePlugin slide change', async () => {
+      const poll: PollDefinition = {
+        id: 'poll-slide-change',
+        sessionId: 'session-poll-deck',
+        slideId: 'slide-poll-deck',
+        question: 'Which option should we choose?',
+        type: 'single',
+        options: [{ id: 'option-a', label: 'Option A' }],
+        status: 'open',
+        resultsRevealed: false,
+      };
+      const pollSummary = {
+        pollId: poll.id,
+        slideId: poll.slideId,
+        status: 'closed' as const,
+        resultsRevealed: true,
+        totalResponses: 3,
+        countsByOptionId: { 'option-a': 3 },
+        question: poll.question,
+        type: poll.type,
+        options: poll.options,
+      };
+      const fetchMock = vi.fn().mockImplementation(async (url: string) => ({
         ok: true,
-        json: async () => ({}),
+        json: async () => (url.endsWith('/polls') ? [poll] : { activePolls: [pollSummary] }),
       }));
 
       const mockDeck: RevealDeck = {
@@ -998,6 +1031,8 @@ describe('QaSlideController and Q&A transitions', () => {
       pollSlideSection.setAttribute('data-slide-id', 'slide-poll-deck');
       pollSlideSection.setAttribute('data-component', 'audience-poll');
 
+      await plugin.getPollController()?.loadPolls();
+
       const slideChangedListener = (mockDeck.on as ReturnType<typeof vi.fn>).mock.calls.find(
         (call) => call[0] === 'slidechanged',
       )?.[1] as (e: RevealSlideChangedEvent) => void;
@@ -1012,6 +1047,12 @@ describe('QaSlideController and Q&A transitions', () => {
 
       const pollCtrl = plugin.getPollController();
       expect(pollCtrl).not.toBeNull();
+      expect(pollSlideSection.querySelector('.poll-question-title')?.textContent).toBe(
+        'Which option should we choose?',
+      );
+      expect(pollSlideSection.querySelector('.poll-option-counts')?.textContent).toContain(
+        '3 votes',
+      );
 
       plugin.destroy();
     });

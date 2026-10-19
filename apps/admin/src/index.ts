@@ -1,6 +1,4 @@
 import {
-  escapeHtml,
-  safeUrlAttribute,
   type AssetManifest,
   type AssetManifestEntry,
   type NavigationRule,
@@ -8,6 +6,8 @@ import {
   type PresentationBranding,
   type PresentationSession,
   type SlideMetadata,
+  escapeHtml,
+  safeUrlAttribute,
 } from '@agora/contracts';
 
 export interface CreateSlideInput {
@@ -669,11 +669,11 @@ export function renderAdminDashboardHtml(state: AdminDashboardViewModel): string
     .map((p) => {
       const activeSession = state.activeSessionsByPresentationId[p.id];
       const sessionBadge = activeSession
-        ? `<span class="badge badge-live">${activeSession.status.toUpperCase()} (${activeSession.id})</span>`
-        : `<span class="badge badge-draft">${p.status}</span>`;
+        ? `<span class="badge badge-live">${escapeHtml(activeSession.status.toUpperCase())} (${escapeHtml(activeSession.id)})</span>`
+        : `<span class="badge badge-draft">${escapeHtml(p.status)}</span>`;
 
       const sessionJoinHtml = activeSession
-        ? `<div class="session-join-info" data-session-id="${activeSession.id}">
+        ? `<div class="session-join-info" data-session-id="${escapeHtml(activeSession.id)}">
             <p class="session-join-link">Join URL: <a href="${safeUrlAttribute(activeSession.audienceUrl ?? null)}" class="session-join-url">${escapeHtml(activeSession.audienceUrl ?? '')}</a></p>
             ${activeSession.qrCodeDataUrl ? `<img src="${safeUrlAttribute(activeSession.qrCodeDataUrl, true)}" alt="Join QR code for ${escapeHtml(p.title)}" class="session-qr-code" />` : ''}
           </div>`
@@ -685,13 +685,13 @@ export function renderAdminDashboardHtml(state: AdminDashboardViewModel): string
           <h3>${escapeHtml(p.title)}</h3>
           ${sessionBadge}
         </div>
-        <p class="revision-label">Revision: <strong>${p.revision}</strong> | Slides: ${p.slides?.length ?? 0}</p>
+        <p class="revision-label">Revision: <strong>${escapeHtml(p.revision)}</strong> | Slides: ${p.slides?.length ?? 0}</p>
         ${sessionJoinHtml}
         <div class="button-group">
-          <button class="btn-primary" data-action="start-session" data-id="${p.id}">Start Live Session</button>
-          <button class="btn-secondary" data-action="generate-images" data-id="${p.id}">Generate Images</button>
-          <button class="btn-secondary" data-action="duplicate" data-id="${p.id}">Duplicate</button>
-          <button class="btn-danger" data-action="request-delete" data-id="${p.id}">Delete</button>
+          <button class="btn-primary" data-action="start-session" data-id="${escapeHtml(p.id)}">Start Live Session</button>
+          <button class="btn-secondary" data-action="generate-images" data-id="${escapeHtml(p.id)}">Generate Images</button>
+          <button class="btn-secondary" data-action="duplicate" data-id="${escapeHtml(p.id)}">Duplicate</button>
+          <button class="btn-danger" data-action="request-delete" data-id="${escapeHtml(p.id)}">Delete</button>
         </div>
       </article>`;
     })
@@ -758,10 +758,10 @@ export function renderDeleteConfirmationModalHtml(modalState: DeleteModalState):
     <div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title">
       <div class="modal-content">
         <h3 id="delete-dialog-title">Confirm Deletion</h3>
-        <p>Are you sure you want to delete <strong>${modalState.presentationTitle ?? 'this presentation'}</strong>? This action is permanent and cannot be undone.</p>
+        <p>Are you sure you want to delete <strong>${escapeHtml(modalState.presentationTitle ?? 'this presentation')}</strong>? This action is permanent and cannot be undone.</p>
         <div class="button-group modal-actions">
           <button class="btn-secondary" data-action="cancel-delete">Cancel</button>
-          <button class="btn-danger" data-action="confirm-delete" data-id="${modalState.presentationId ?? ''}">Delete Presentation</button>
+          <button class="btn-danger" data-action="confirm-delete" data-id="${escapeHtml(modalState.presentationId ?? '')}">Delete Presentation</button>
         </div>
       </div>
     </div>`;

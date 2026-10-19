@@ -1940,6 +1940,37 @@ describe('Worker HTTP API Integration Tests', () => {
       Authorization: `Bearer ${session.presenterToken}`,
     };
 
+    const invalidPollPayloads = [
+      {
+        slideId: 'slide-poll-1',
+        question: 'Invalid type',
+        type: 'unknown',
+        options: [{ id: 'a' }],
+      },
+      {
+        slideId: 'slide-poll-1',
+        question: 'Invalid status',
+        status: 'revealed',
+        options: [{ id: 'a' }],
+      },
+      { slideId: 'slide-poll-1', question: 'Blank option ID', options: [{ id: '  ' }] },
+      {
+        slideId: 'slide-poll-1',
+        question: 'Duplicate option IDs',
+        options: [{ id: 'a' }, { id: 'a' }],
+      },
+    ];
+    for (const payload of invalidPollPayloads) {
+      const invalidResponse = await app.fetch(
+        new Request(`https://api.agora.test/api/v1/sessions/${session.id}/polls`, {
+          method: 'POST',
+          headers: presenterHeaders,
+          body: JSON.stringify(payload),
+        }),
+      );
+      expect(invalidResponse.status).toBe(400);
+    }
+
     // Join attendees Alice and Bob
     const joinAlice = await app.fetch(
       new Request(`https://api.agora.test/api/v1/sessions/${session.id}/join`, {

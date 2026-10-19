@@ -2259,8 +2259,34 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         status?: PollStatus;
       };
 
-      if (!body.slideId || !body.question || !body.options || body.options.length === 0) {
+      if (
+        !body.slideId ||
+        !body.question ||
+        !Array.isArray(body.options) ||
+        body.options.length === 0
+      ) {
         return errorResponse('slideId, question, and options are required', 400);
+      }
+
+      const allowedTypes: PollType[] = [
+        'single',
+        'single-choice',
+        'multiple',
+        'multiple-choice',
+        'binary',
+      ];
+      if (body.type !== undefined && !allowedTypes.includes(body.type)) {
+        return errorResponse('Invalid poll type', 400);
+      }
+      if (body.status !== undefined && body.status !== 'draft' && body.status !== 'open') {
+        return errorResponse("status must be 'draft' or 'open'", 400);
+      }
+      const optionIds = body.options.map((option) => option?.id);
+      if (
+        optionIds.some((id) => typeof id !== 'string' || id.trim() === '') ||
+        new Set(optionIds).size !== optionIds.length
+      ) {
+        return errorResponse('Option IDs must be unique non-empty strings', 400);
       }
 
       const normalizedOptions: PollOption[] = body.options.map((opt) => ({
