@@ -42,7 +42,23 @@ const presenterSec = [
   { PresenterHeaderToken: [] },
   { AdminBearerAuth: [] },
 ];
+const presenterOrPublicSec = [{}, ...presenterSec];
 const participantSec = [{ ParticipantBearerAuth: [] }, { ParticipantHeaderToken: [] }];
+
+const pollStatusOperation = (action: 'open' | 'close') => ({
+  parameters: [pathParam('id', 'Session identifier'), pathParam('pollId', 'Poll identifier')],
+  post: {
+    tags: ['Interactions'],
+    operationId: `${action}Poll`,
+    summary: `${action === 'open' ? 'Reopen' : 'Close'} a slide poll (SPEC-010)`,
+    security: presenterSec,
+    responses: {
+      '200': jsonRes(`${action === 'open' ? 'Opened' : 'Closed'} poll`, ref('PollDefinition')),
+      '403': errRes('Unauthorized presenter'),
+      '404': errRes('Poll not found'),
+    },
+  },
+});
 
 export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
   openapi: '3.1.0',
@@ -219,6 +235,53 @@ export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
           '401': errRes('Unauthorized admin'),
           '404': errRes('Presentation not found'),
           '409': errRes('Revision mismatch conflict'),
+        },
+      },
+    },
+    '/api/v1/presentations/{id}/navigation-rules': {
+      parameters: [pathParam('id', 'Presentation identifier')],
+      get: {
+        tags: ['Presentations'],
+        operationId: 'listNavigationRules',
+        summary: 'List adaptive-navigation rules configured for a presentation (SPEC-011)',
+        security: adminSec,
+        responses: {
+          '200': jsonRes('Presentation navigation rules', {
+            type: 'array',
+            items: ref('NavigationRule'),
+          }),
+          '401': errRes('Unauthorized admin'),
+          '404': errRes('Presentation not found'),
+        },
+      },
+      post: {
+        tags: ['Presentations'],
+        operationId: 'createNavigationRule',
+        summary: 'Configure an adaptive branch rule for a presentation (SPEC-011)',
+        security: adminSec,
+        requestBody: jsonBody(ref('NavigationRuleInput')),
+        responses: {
+          '201': jsonRes('Created navigation rule', ref('NavigationRule')),
+          '400': errRes('Invalid rule or destination coordinates'),
+          '401': errRes('Unauthorized admin'),
+          '404': errRes('Presentation not found'),
+        },
+      },
+    },
+    '/api/v1/presentations/{id}/navigation-rules/{ruleId}': {
+      parameters: [
+        pathParam('id', 'Presentation identifier'),
+        pathParam('ruleId', 'Rule identifier'),
+      ],
+      delete: {
+        tags: ['Presentations'],
+        operationId: 'deleteNavigationRule',
+        summary: 'Remove an adaptive branch rule from a presentation (SPEC-011)',
+        security: adminSec,
+        responses: {
+          '200': jsonRes('Deleted navigation rule', { type: 'object' }),
+          '401': errRes('Unauthorized admin'),
+          '404': errRes('Presentation or navigation rule not found'),
         },
       },
     },
@@ -458,6 +521,21 @@ export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
     },
     '/api/v1/sessions/{id}/polls': {
       parameters: [pathParam('id', 'Session identifier')],
+      get: {
+        tags: ['Interactions'],
+        operationId: 'listPolls',
+        summary: 'List polls accessible in a session (SPEC-010)',
+        description:
+          'Unauthenticated responses include polls only for revealed slides; presenter credentials return all polls.',
+        security: presenterOrPublicSec,
+        responses: {
+          '200': jsonRes('Polls accessible to the caller', {
+            type: 'array',
+            items: ref('PollDefinition'),
+          }),
+          '404': errRes('Session not found'),
+        },
+      },
       post: {
         tags: ['Interactions'],
         operationId: 'createPoll',
@@ -469,13 +547,21 @@ export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
           properties: {
             slideId: { type: 'string' },
             question: { type: 'string' },
-            type: { type: 'string', enum: ['single', 'multiple', 'binary'] },
+            type: {
+              type: 'string',
+              enum: ['single', 'single-choice', 'multiple', 'multiple-choice', 'binary'],
+            },
+            status: { type: 'string', enum: ['draft', 'open'] },
             options: {
               type: 'array',
               items: {
                 type: 'object',
-                required: ['id', 'label'],
-                properties: { id: { type: 'string' }, label: { type: 'string' } },
+                required: ['id'],
+                properties: {
+                  id: { type: 'string' },
+                  label: { type: 'string' },
+                  text: { type: 'string' },
+                },
               },
             },
           },
@@ -497,21 +583,60 @@ export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
         security: participantSec,
         requestBody: jsonBody({
           type: 'object',
-          required: ['optionId'],
-          properties: { optionId: { type: 'string' } },
+          properties: {
+            selectedOptionIds: { type: 'array', minItems: 1, items: { type: 'string' } },
+            selectedOptionId: { type: 'string', deprecated: true },
+            optionId: { type: 'string', deprecated: true },
+          },
         }),
         responses: {
-          '200': jsonRes('Poll results summary and navigation suggestions', {
+          '200': jsonRes('Poll results summary', {
             type: 'object',
             properties: {
               ok: { type: 'boolean' },
               summary: ref('PollResultsSummary'),
-              suggestions: { type: 'array', items: { type: 'object' } },
             },
           }),
           '400': errRes('Invalid option or closed poll'),
           '401': errRes('Unauthorized participant'),
           '409': errRes('Participant already voted'),
+        },
+      },
+    },
+    '/api/v1/sessions/{id}/polls/{pollId}/open': pollStatusOperation('open'),
+    '/api/v1/sessions/{id}/polls/{pollId}/close': {
+      parameters: [pathParam('id', 'Session identifier'), pathParam('pollId', 'Poll identifier')],
+      post: {
+        tags: ['Interactions'],
+        operationId: 'closePoll',
+        summary: 'Close a poll and evaluate adaptive-navigation rules (SPEC-010, SPEC-011)',
+        security: presenterSec,
+        responses: {
+          '200': jsonRes('Closed poll and matching navigation suggestions', {
+            allOf: [
+              ref('PollDefinition'),
+              {
+                type: 'object',
+                properties: { suggestions: { type: 'array', items: ref('NavigationSuggestion') } },
+              },
+            ],
+          }),
+          '403': errRes('Unauthorized presenter'),
+          '404': errRes('Poll not found'),
+        },
+      },
+    },
+    '/api/v1/sessions/{id}/polls/{pollId}/reveal': {
+      parameters: [pathParam('id', 'Session identifier'), pathParam('pollId', 'Poll identifier')],
+      post: {
+        tags: ['Interactions'],
+        operationId: 'revealPollResults',
+        summary: 'Reveal poll results to audience and projector (SPEC-010)',
+        security: presenterSec,
+        responses: {
+          '200': jsonRes('Revealed poll results', ref('PollResultsSummary')),
+          '403': errRes('Unauthorized presenter'),
+          '404': errRes('Poll not found'),
         },
       },
     },
@@ -761,15 +886,27 @@ export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
           sessionId: { type: 'string' },
           slideId: { type: 'string' },
           question: { type: 'string' },
-          type: { type: 'string', enum: ['single', 'multiple', 'binary'] },
+          type: {
+            type: 'string',
+            enum: ['single', 'single-choice', 'multiple', 'multiple-choice', 'binary'],
+          },
           options: { type: 'array', items: { type: 'object' } },
-          status: { type: 'string', enum: ['draft', 'open', 'closed'] },
+          status: { type: 'string', enum: ['draft', 'open', 'closed', 'revealed'] },
           resultsRevealed: { type: 'boolean' },
         },
       },
       PollResultsSummary: {
         type: 'object',
-        required: ['pollId', 'slideId', 'status', 'totalResponses', 'countsByOptionId'],
+        required: [
+          'pollId',
+          'slideId',
+          'status',
+          'totalResponses',
+          'countsByOptionId',
+          'question',
+          'type',
+          'options',
+        ],
         properties: {
           pollId: { type: 'string' },
           slideId: { type: 'string' },
@@ -777,6 +914,67 @@ export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
           resultsRevealed: { type: 'boolean' },
           totalResponses: { type: 'integer' },
           countsByOptionId: { type: 'object', additionalProperties: { type: 'integer' } },
+          question: { type: 'string' },
+          type: {
+            type: 'string',
+            enum: ['single', 'single-choice', 'multiple', 'multiple-choice', 'binary'],
+          },
+          options: { type: 'array', items: { type: 'object' } },
+        },
+      },
+      NavigationRuleInput: {
+        type: 'object',
+        required: [
+          'sourceSlideId',
+          'pollId',
+          'optionId',
+          'minVoteThreshold',
+          'targetSlideId',
+          'targetHorizontalIndex',
+          'targetVerticalIndex',
+        ],
+        properties: {
+          sourceSlideId: { type: 'string' },
+          pollId: { type: 'string' },
+          optionId: { type: 'string' },
+          minVoteThreshold: { type: 'integer', minimum: 1 },
+          minPercentageThreshold: { type: 'number', minimum: 0, maximum: 100 },
+          targetSlideId: { type: 'string' },
+          targetHorizontalIndex: { type: 'integer', minimum: 0 },
+          targetVerticalIndex: { type: 'integer', minimum: 0 },
+        },
+      },
+      NavigationRule: {
+        allOf: [
+          ref('NavigationRuleInput'),
+          {
+            type: 'object',
+            required: ['id', 'presentationId'],
+            properties: { id: { type: 'string' }, presentationId: { type: 'string' } },
+          },
+        ],
+      },
+      NavigationSuggestion: {
+        type: 'object',
+        required: [
+          'ruleId',
+          'sourceSlideId',
+          'pollId',
+          'optionId',
+          'targetSlideId',
+          'targetHorizontalIndex',
+          'targetVerticalIndex',
+          'reason',
+        ],
+        properties: {
+          ruleId: { type: 'string' },
+          sourceSlideId: { type: 'string' },
+          pollId: { type: 'string' },
+          optionId: { type: 'string' },
+          targetSlideId: { type: 'string' },
+          targetHorizontalIndex: { type: 'integer' },
+          targetVerticalIndex: { type: 'integer' },
+          reason: { type: 'string' },
         },
       },
       WordCloudPrompt: {

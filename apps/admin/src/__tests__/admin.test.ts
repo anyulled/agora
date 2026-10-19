@@ -144,6 +144,106 @@ describe('AdminAppController (SPEC-001, SPEC-013, SPEC-015, SPEC-017, SPEC-024)'
     });
   });
 
+  describe('Adaptive Navigation Settings (SPEC-011)', () => {
+    it('configures and removes a branch rule that targets a valid 2D destination', () => {
+      const presentation = admin.createPresentation({
+        title: 'Branching Deck',
+        slides: [
+          { title: 'Poll', horizontalIndex: 0, verticalIndex: 0 },
+          { title: 'Details', horizontalIndex: 1, verticalIndex: 1 },
+        ],
+      });
+      const [sourceSlide, targetSlide] = presentation.slides ?? [];
+
+      const rule = admin.addNavigationRule(presentation.id, {
+        sourceSlideId: sourceSlide!.id,
+        pollId: 'poll-architecture',
+        optionId: 'show-details',
+        minVoteThreshold: 3,
+        minPercentageThreshold: 60,
+        targetSlideId: targetSlide!.id,
+        targetHorizontalIndex: 1,
+        targetVerticalIndex: 1,
+      });
+
+      expect(admin.getNavigationRules(presentation.id)).toEqual([rule]);
+      admin.removeNavigationRule(presentation.id, rule.id);
+      expect(admin.getNavigationRules(presentation.id)).toEqual([]);
+    });
+
+    it('rejects a branch rule whose coordinates do not identify its target slide', () => {
+      const presentation = admin.createPresentation({
+        title: 'Validated Branching Deck',
+        slides: [
+          { title: 'Poll', horizontalIndex: 0, verticalIndex: 0 },
+          { title: 'Details', horizontalIndex: 1, verticalIndex: 1 },
+        ],
+      });
+      const [sourceSlide, targetSlide] = presentation.slides ?? [];
+
+      expect(() =>
+        admin.addNavigationRule(presentation.id, {
+          sourceSlideId: sourceSlide!.id,
+          pollId: 'poll-architecture',
+          optionId: 'show-details',
+          minVoteThreshold: 1,
+          targetSlideId: targetSlide!.id,
+          targetHorizontalIndex: 1,
+          targetVerticalIndex: 0,
+        }),
+      ).toThrow(/coordinates must match/);
+    });
+
+    it('rejects non-finite percentage thresholds and tracks edited destination coordinates', () => {
+      const presentation = admin.createPresentation({
+        title: 'Coordinate Updates',
+        slides: [
+          { title: 'Poll', horizontalIndex: 0, verticalIndex: 0 },
+          { title: 'Destination', horizontalIndex: 1, verticalIndex: 0 },
+          { title: 'Other', horizontalIndex: 2, verticalIndex: 0 },
+        ],
+      });
+      const [sourceSlide, targetSlide, otherSlide] = presentation.slides ?? [];
+      const baseRule = {
+        sourceSlideId: sourceSlide!.id,
+        pollId: 'poll-coordinate-update',
+        optionId: 'yes',
+        minVoteThreshold: 1,
+      };
+      expect(() =>
+        admin.addNavigationRule(presentation.id, {
+          ...baseRule,
+          minPercentageThreshold: Number.NaN,
+          targetSlideId: targetSlide!.id,
+          targetHorizontalIndex: 1,
+          targetVerticalIndex: 0,
+        }),
+      ).toThrow(/minPercentageThreshold must be between 0 and 100/);
+      const targetRule = admin.addNavigationRule(presentation.id, {
+        ...baseRule,
+        targetSlideId: targetSlide!.id,
+        targetHorizontalIndex: 1,
+        targetVerticalIndex: 0,
+      });
+      const otherRule = admin.addNavigationRule(presentation.id, {
+        ...baseRule,
+        targetSlideId: otherSlide!.id,
+        targetHorizontalIndex: 2,
+        targetVerticalIndex: 0,
+      });
+
+      admin.updateSlide(presentation.id, targetSlide!.id, {
+        horizontalIndex: 4,
+        verticalIndex: 2,
+      });
+
+      expect(admin.getNavigationRules(presentation.id)).toEqual([
+        { ...targetRule, targetHorizontalIndex: 4, targetVerticalIndex: 2 },
+        otherRule,
+      ]);
+    });
+  });
+
   describe('Browser-side PNG Generation Workflow (SPEC-013)', () => {
     it('tracks per-slide progress, logs errors, and retries failed slides', async () => {
       const pres = admin.createPresentation({
@@ -259,7 +359,7 @@ describe('AdminAppController (SPEC-001, SPEC-013, SPEC-015, SPEC-017, SPEC-024)'
 
       expect(html).toContain('Dashboard Presentation');
       expect(html).toContain('Start Live Session');
-      expect(html).toContain('Generate Images');
+      expect(html).toContain('Generate All Slide Images');
       expect(html).toContain(session.audienceUrl);
       expect(html).toContain('session-qr-code');
     });
@@ -272,6 +372,17 @@ describe('AdminAppController (SPEC-001, SPEC-013, SPEC-015, SPEC-017, SPEC-024)'
       expect(html).toContain('Confirm Deletion');
       expect(html).toContain('Confirm Me');
       expect(html).toContain('Delete Presentation');
+    });
+
+    it('escapes user-controlled values in the delete confirmation modal', () => {
+      const html = renderDeleteConfirmationModalHtml({
+        isOpen: true,
+        presentationId: 'id"><img src=x onerror=alert(1)>',
+        presentationTitle: '<img src=x onerror=alert(1)>',
+      });
+
+      expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+      expect(html).not.toContain('<img src=x');
     });
 
     it('renders workflow HTML with progress bar and retry alerts', () => {

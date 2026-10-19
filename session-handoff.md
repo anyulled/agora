@@ -1,44 +1,28 @@
-# Agora Session Handoff Document
-
-> Structured session handoff adhering to Harness Engineering Practice 5.
-> Overwritten at the end of each session to guarantee seamless agent handoffs.
+# Agora Session Handoff
 
 ## Verified Now
+- PR #51 (Issue #20: Presenter View) has successfully passed all 11/11 CI checks and merged into `main`.
+- Reconciled PR #48 with latest `main`: Worker routes, presenter views, and OpenAPI specs merged cleanly.
+- Local duplication detector uses a 3% total threshold and 10% per-file guard; `pnpm run verify` and `./init.sh` passed with 212 tests.
+- Addressed PR #48 CodeRabbit findings: poll summaries respect slide reveal, Durable Object poll tables initialize independently, suggestions reach presenter-authenticated sockets only, suggestion text is escaped, and docs/openapi.json matches AGORA_OPENAPI_SPEC.
+- Tokens stay in page memory and users re-enter them after reload; legacy saved presenter tokens are sanitized.
+- Canonical `./init.sh` and `pnpm run verify` pass with 15/15 test files and all three victory layers.
 
-- GitHub issue #20 (SPEC-012 Presenter view) is implemented on branch `feat/issue-20-presenter-view` in worktree `/Users/alrs/Documents/agora-issue-20`.
-- Presenter session pages are now served by the Worker with authenticated access, arrow-key navigation, live reaction/question/attendee metrics, and session completion controls.
-- Projector session pages are now served separately and verified to exclude presenter-only controls and private metrics.
-- `./init.sh` passed, including harness checks, architecture, duplication, Mermaid, OpenAPI, lint, typecheck, and 194 tests.
-- `pnpm run verify` passed all stages, including build, test, and the three-layer victory detector.
-- PR #51 presenter/projector route test setup was simplified to remove repeated scaffolding; focused coverage and full verification plus `./init.sh` passed again with 194 tests.
+## Changed
+- Merged `origin/main` into `fix/resolve-code-scanning-findings`.
+- Resolved merge conflicts in `agent-progress.md` and `session-handoff.md`.
+- Integrated presenter/projector routes from PR #51 with poll presentation features from PR #48.
 
-## Changed This Session
-
-- Updated `apps/worker/src/index.ts` to serve `/presenter/:sessionId` and `/projector/:sessionId`, build presenter/projector state from the existing presenter controller, and refresh views through HTML fragments.
-- Added inline presenter runtime behavior for arrow-key navigation, directional pad actions, session completion, and WebSocket-driven refresh against existing session APIs.
-- Added integration coverage in `tests/integration/worker-api.test.ts` for presenter auth, presenter fragment delivery, and projection isolation.
-- Simplified the new integration test fixture by seeding in-memory app state directly, reducing repeated setup code.
-- Updated `feature_list.json` evidence for SPEC-012 to reflect the delivered Worker routes and the current verification commands.
-
-## Broken Or Unverified
-
-- Hosted SonarCloud reanalysis is pending push. All 15 test suites and 194 tests pass, and all three victory layers pass locally.
+## Broken or Unverified
+- PR #48 requires push of the reconciled merge commit to trigger final CI run and auto-merge.
 
 ## Next Best Step
+1. Run `./init.sh` to guarantee all tests and harness linters pass.
+2. Commit merge resolution and push to `origin/fix/resolve-code-scanning-findings`.
+3. Monitor PR #48 auto-merge into `main`.
 
-1. Commit and push the review follow-up on `feat/issue-20-presenter-view`.
-2. Confirm the SonarCloud duplication quality gate on PR #51.
-3. Monitor remaining review feedback and checks for the presenter/projector Worker routes.
-
-## Reproducer & Verification Commands
-
+## Reproducer and Verification
 ```bash
-# 1. Canonical baseline verification
 ./init.sh
-
-# 2. Focused presenter verification
-pnpm exec vitest run apps/presenter/src/__tests__/presenter.test.ts tests/integration/worker-api.test.ts
-
-# 3. Three-Layer Victory detector & full verification suite
 pnpm run verify
 ```

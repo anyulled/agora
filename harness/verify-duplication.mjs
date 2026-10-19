@@ -6,7 +6,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 
-export function evaluateDuplicationOutput(rawOutput, maxThreshold = 10) {
+export function evaluateDuplicationOutput(rawOutput, maxThreshold = 3, maxFileThreshold = 10) {
   // Strip ANSI escape codes so bolded numbers like "\u001b[1m1.7%\u001b[22m duplication" parse cleanly
   const ansiRegex = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
   const output = String(rawOutput || '').replace(ansiRegex, '');
@@ -29,7 +29,7 @@ export function evaluateDuplicationOutput(rawOutput, maxThreshold = 10) {
     if (m) {
       const filePath = m[1];
       const percent = Number.parseFloat(m[2]);
-      if (percent > maxThreshold) {
+      if (percent > maxFileThreshold) {
         violatingFiles.push({ file: filePath, duplicationPercent: percent });
       }
     }
@@ -58,8 +58,8 @@ export function evaluateDuplicationOutput(rawOutput, maxThreshold = 10) {
   const valid = totalDuplicationPercent <= maxThreshold && violatingFiles.length === 0;
 
   const message = valid
-    ? `✅ Code duplication check passed (${totalDuplicationPercent}% total duplication <= ${maxThreshold}% threshold; 0 files > ${maxThreshold}%).`
-    : `❌ [Code Duplication Threshold Exceeded (> ${maxThreshold}%)] Please refactor duplicated code blocks using DRY extraction strategies (extract shared helper function, parameterize common handler logic, or move shared domain/application logic into a reusable module). Run 'npx jscpd --reporters ai --summary packages apps harness infrastructure' (see sops/jscpd-dry-refactoring.md) to inspect clone hotspots.`;
+    ? `✅ Code duplication check passed (${totalDuplicationPercent}% total duplication <= ${maxThreshold}% threshold; 0 files > ${maxFileThreshold}%).`
+    : `❌ [Code Duplication Threshold Exceeded (> ${maxThreshold}% total or > ${maxFileThreshold}% per file)] Please refactor duplicated code blocks using DRY extraction strategies (extract shared helper function, parameterize common handler logic, or move shared domain/application logic into a reusable module). Run 'npx jscpd --reporters ai --summary packages apps harness infrastructure' (see sops/jscpd-dry-refactoring.md) to inspect clone hotspots.`;
 
   return {
     valid,
@@ -95,7 +95,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   );
 
   const output = `${proc.stdout || ''}\n${proc.stderr || ''}`;
-  const result = evaluateDuplicationOutput(output, 10);
+  const result = evaluateDuplicationOutput(output, 3, 10);
 
   if (!result.valid || proc.status !== 0) {
     console.error(result.message);
@@ -103,7 +103,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.error('\nViolating Files (>10% duplication):');
       for (const vf of result.violatingFiles) {
         console.error(
-          `  - ${vf.file}: ${vf.duplicationPercent}% (exceeds 10% limit — refactor duplicated blocks)`,
+          `  - ${vf.file}: ${vf.duplicationPercent}% (exceeds 10% per-file limit — refactor duplicated blocks)`,
         );
       }
     }

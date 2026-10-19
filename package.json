@@ -7,7 +7,7 @@
   "packageManager": "pnpm@11.5.2",
   "scripts": {
     "build": "pnpm -r build",
-    "dev": "pnpm --parallel -r dev",
+    "dev": "node scripts/dev-local.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint:eslint": "eslint . --max-warnings=0",
     "lint:dup": "node harness/verify-duplication.mjs",
@@ -47,7 +47,9 @@
     "mermaid": "^12.2.0",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.71.2",
+    "vite": "7.3.7",
     "vitest": "^4.1.11",
-    "wrangler": "^4.151.1"
+    "wrangler": "^4.151.1",
+    "ws": "8.18.3"
   }
 }

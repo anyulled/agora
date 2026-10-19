@@ -541,6 +541,199 @@
         }
       }
     },
+    "/api/v1/presentations/{id}/navigation-rules": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Presentation identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": ["Presentations"],
+        "operationId": "listNavigationRules",
+        "summary": "List adaptive-navigation rules configured for a presentation (SPEC-011)",
+        "security": [
+          {
+            "AdminBearerAuth": []
+          },
+          {
+            "AdminHeaderToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Presentation navigation rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NavigationRule"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Presentation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Presentations"],
+        "operationId": "createNavigationRule",
+        "summary": "Configure an adaptive branch rule for a presentation (SPEC-011)",
+        "security": [
+          {
+            "AdminBearerAuth": []
+          },
+          {
+            "AdminHeaderToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NavigationRuleInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created navigation rule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NavigationRule"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid rule or destination coordinates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Presentation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/presentations/{id}/navigation-rules/{ruleId}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Presentation identifier",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "ruleId",
+          "in": "path",
+          "required": true,
+          "description": "Rule identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "delete": {
+        "tags": ["Presentations"],
+        "operationId": "deleteNavigationRule",
+        "summary": "Remove an adaptive branch rule from a presentation (SPEC-011)",
+        "security": [
+          {
+            "AdminBearerAuth": []
+          },
+          {
+            "AdminHeaderToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted navigation rule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Presentation or navigation rule not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/presentations/{id}/sessions": {
       "parameters": [
         {
@@ -1417,6 +1610,49 @@
           }
         }
       ],
+      "get": {
+        "tags": ["Interactions"],
+        "operationId": "listPolls",
+        "summary": "List polls accessible in a session (SPEC-010)",
+        "description": "Unauthenticated responses include polls only for revealed slides; presenter credentials return all polls.",
+        "security": [
+          {},
+          {
+            "PresenterBearerAuth": []
+          },
+          {
+            "PresenterHeaderToken": []
+          },
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Polls accessible to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PollDefinition"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": ["Interactions"],
         "operationId": "createPoll",
@@ -1448,18 +1684,25 @@
                   },
                   "type": {
                     "type": "string",
-                    "enum": ["single", "multiple", "binary"]
+                    "enum": ["single", "single-choice", "multiple", "multiple-choice", "binary"]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["draft", "open"]
                   },
                   "options": {
                     "type": "array",
                     "items": {
                       "type": "object",
-                      "required": ["id", "label"],
+                      "required": ["id"],
                       "properties": {
                         "id": {
                           "type": "string"
                         },
                         "label": {
+                          "type": "string"
+                        },
+                        "text": {
                           "type": "string"
                         }
                       }
@@ -1543,10 +1786,21 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["optionId"],
                 "properties": {
+                  "selectedOptionIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "selectedOptionId": {
+                    "type": "string",
+                    "deprecated": true
+                  },
                   "optionId": {
-                    "type": "string"
+                    "type": "string",
+                    "deprecated": true
                   }
                 }
               }
@@ -1555,7 +1809,7 @@
         },
         "responses": {
           "200": {
-            "description": "Poll results summary and navigation suggestions",
+            "description": "Poll results summary",
             "content": {
               "application/json": {
                 "schema": {
@@ -1566,12 +1820,6 @@
                     },
                     "summary": {
                       "$ref": "#/components/schemas/PollResultsSummary"
-                    },
-                    "suggestions": {
-                      "type": "array",
-                      "items": {
-                        "type": "object"
-                      }
                     }
                   }
                 }
@@ -1600,6 +1848,231 @@
           },
           "409": {
             "description": "Participant already voted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/polls/{pollId}/open": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pollId",
+          "in": "path",
+          "required": true,
+          "description": "Poll identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Interactions"],
+        "operationId": "openPoll",
+        "summary": "Reopen a slide poll (SPEC-010)",
+        "security": [
+          {
+            "PresenterBearerAuth": []
+          },
+          {
+            "PresenterHeaderToken": []
+          },
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Opened poll",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PollDefinition"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Unauthorized presenter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Poll not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/polls/{pollId}/close": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pollId",
+          "in": "path",
+          "required": true,
+          "description": "Poll identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Interactions"],
+        "operationId": "closePoll",
+        "summary": "Close a poll and evaluate adaptive-navigation rules (SPEC-010, SPEC-011)",
+        "security": [
+          {
+            "PresenterBearerAuth": []
+          },
+          {
+            "PresenterHeaderToken": []
+          },
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Closed poll and matching navigation suggestions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/PollDefinition"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "suggestions": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/NavigationSuggestion"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Unauthorized presenter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Poll not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/polls/{pollId}/reveal": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Session identifier",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pollId",
+          "in": "path",
+          "required": true,
+          "description": "Poll identifier",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": ["Interactions"],
+        "operationId": "revealPollResults",
+        "summary": "Reveal poll results to audience and projector (SPEC-010)",
+        "security": [
+          {
+            "PresenterBearerAuth": []
+          },
+          {
+            "PresenterHeaderToken": []
+          },
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revealed poll results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PollResultsSummary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Unauthorized presenter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Poll not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -2273,7 +2746,7 @@
           },
           "type": {
             "type": "string",
-            "enum": ["single", "multiple", "binary"]
+            "enum": ["single", "single-choice", "multiple", "multiple-choice", "binary"]
           },
           "options": {
             "type": "array",
@@ -2283,7 +2756,7 @@
           },
           "status": {
             "type": "string",
-            "enum": ["draft", "open", "closed"]
+            "enum": ["draft", "open", "closed", "revealed"]
           },
           "resultsRevealed": {
             "type": "boolean"
@@ -2292,7 +2765,16 @@
       },
       "PollResultsSummary": {
         "type": "object",
-        "required": ["pollId", "slideId", "status", "totalResponses", "countsByOptionId"],
+        "required": [
+          "pollId",
+          "slideId",
+          "status",
+          "totalResponses",
+          "countsByOptionId",
+          "question",
+          "type",
+          "options"
+        ],
         "properties": {
           "pollId": {
             "type": "string"
@@ -2314,6 +2796,120 @@
             "additionalProperties": {
               "type": "integer"
             }
+          },
+          "question": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["single", "single-choice", "multiple", "multiple-choice", "binary"]
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "NavigationRuleInput": {
+        "type": "object",
+        "required": [
+          "sourceSlideId",
+          "pollId",
+          "optionId",
+          "minVoteThreshold",
+          "targetSlideId",
+          "targetHorizontalIndex",
+          "targetVerticalIndex"
+        ],
+        "properties": {
+          "sourceSlideId": {
+            "type": "string"
+          },
+          "pollId": {
+            "type": "string"
+          },
+          "optionId": {
+            "type": "string"
+          },
+          "minVoteThreshold": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minPercentageThreshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "targetSlideId": {
+            "type": "string"
+          },
+          "targetHorizontalIndex": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "targetVerticalIndex": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "NavigationRule": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/NavigationRuleInput"
+          },
+          {
+            "type": "object",
+            "required": ["id", "presentationId"],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "presentationId": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "NavigationSuggestion": {
+        "type": "object",
+        "required": [
+          "ruleId",
+          "sourceSlideId",
+          "pollId",
+          "optionId",
+          "targetSlideId",
+          "targetHorizontalIndex",
+          "targetVerticalIndex",
+          "reason"
+        ],
+        "properties": {
+          "ruleId": {
+            "type": "string"
+          },
+          "sourceSlideId": {
+            "type": "string"
+          },
+          "pollId": {
+            "type": "string"
+          },
+          "optionId": {
+            "type": "string"
+          },
+          "targetSlideId": {
+            "type": "string"
+          },
+          "targetHorizontalIndex": {
+            "type": "integer"
+          },
+          "targetVerticalIndex": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
           }
         }
       },

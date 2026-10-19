@@ -197,6 +197,29 @@ describe('PresenterAppController (SPEC-008, SPEC-011, SPEC-012, SPEC-023)', () =
       expect(state.activeSuggestion).not.toBeNull();
     });
 
+    it('receives a navigation.suggested event without automatically navigating', () => {
+      presenter.handleRealtimeEvent({
+        id: 'event-suggestion',
+        type: 'navigation.suggested',
+        sessionId: 'sess_1',
+        timestamp: new Date().toISOString(),
+        payload: mockSuggestion,
+      });
+
+      expect(presenter.getActiveSuggestion()?.targetSlideId).toBe('slide_1_detail');
+      expect(presenter.getCurrentSlide()?.id).toBe('slide_0');
+    });
+
+    it('escapes untrusted navigation suggestion text in the presenter view', () => {
+      const html = renderPresenterViewHtml({
+        ...presenter.getViewState(),
+        activeSuggestion: { ...mockSuggestion, reason: '<img src=x onerror=alert(1)>' },
+      });
+
+      expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+      expect(html).not.toContain('<img src=x onerror=alert(1)>');
+    });
+
     it('requires explicit confirmation before jumping to target slide', () => {
       presenter.setNavigationSuggestion(mockSuggestion);
       const jumped = presenter.acceptNavigationSuggestion();
@@ -498,6 +521,214 @@ describe('PresenterAppController (SPEC-008, SPEC-011, SPEC-012, SPEC-023)', () =
       unsubscribe();
       presenter.receiveReaction('slide_0', '👍');
       expect(notifiedCount).toBe(1); // No further notifications after unsubscribe
+    });
+  });
+
+  describe('SPEC-010: Contextual polls and presenter/projector synchronization', () => {
+    it('loads authoritative poll summaries before revealing results', async () => {
+      const summary = {
+        pollId: 'poll-arch',
+        slideId: 'slide_0',
+        status: 'closed' as const,
+        resultsRevealed: false,
+        totalResponses: 2,
+        countsByOptionId: { 'opt-yes': 1, 'opt-no': 1 },
+        question: 'Which option?',
+        type: 'binary' as const,
+        options: [
+          { id: 'opt-yes', label: 'Yes' },
+          { id: 'opt-no', label: 'No' },
+        ],
+      };
+      const fetchFn: typeof fetch = async () =>
+        new Response(JSON.stringify({ activePolls: [summary] }), { status: 200 });
+
+      expect(await presenter.loadPolls('https://api.agora.test/', 'presenter-token', fetchFn)).toBe(
+        true,
+      );
+      expect(presenter.getPollResults('poll-arch')?.countsByOptionId['opt-yes']).toBe(1);
+      expect(presenter.getPollsForSlide('slide_0')[0]?.id).toBe('poll-arch');
+      expect(presenter.revealPollResults('poll-arch')).toBe(true);
+      expect(presenter.getProjectorViewState().projectedPollResults?.totalResponses).toBe(2);
+    });
+
+    it('creates an empty authoritative summary when revealing before results load', () => {
+      const poll = {
+        id: 'poll-no-votes-yet',
+        sessionId: 'sess_1',
+        slideId: 'slide_0',
+        question: 'Which option?',
+        type: 'single' as const,
+        options: [{ id: 'option-a', label: 'Option A' }],
+        status: 'open' as const,
+        resultsRevealed: false,
+      };
+
+      presenter.setPolls([poll]);
+      expect(presenter.getPollResults(poll.id)).toBeNull();
+      expect(presenter.revealPollResults(poll.id)).toBe(true);
+      expect(presenter.getPollResults(poll.id)).toMatchObject({
+        totalResponses: 0,
+        countsByOptionId: { 'option-a': 0 },
+        resultsRevealed: true,
+      });
+    });
+
+    it('manages poll lifecycle (open, close, reveal) and synchronizes with projector', () => {
+      const poll = {
+        id: 'poll-arch',
+        sessionId: 'sess_1',
+        slideId: 'slide_0',
+        question: 'Should we dive into Advanced Clean Architecture?',
+        type: 'binary' as const,
+        options: [
+          { id: 'opt-yes', label: 'Yes, dive deep' },
+          { id: 'opt-no', label: 'No, stay high-level' },
+        ],
+        status: 'draft' as const,
+        resultsRevealed: false,
+      };
+
+      presenter.addPoll(poll);
+      expect(presenter.getPollsForSlide('slide_0').length).toBe(1);
+      expect(presenter.getActivePollForSlide('slide_0')?.status).toBe('draft');
+
+      // 1. Initially unrevealed on projector
+      const initialProjector = presenter.getProjectorViewState();
+      expect(initialProjector.projectedPoll).toBeNull();
+      expect(initialProjector.projectedPollResults).toBeNull();
+      const initialProjHtml = renderProjectorViewHtml(initialProjector);
+      expect(initialProjHtml).not.toContain('projector-poll-slide');
+
+      // 2. Open poll on demand
+      expect(presenter.openPoll('poll-arch')).toBe(true);
+      expect(presenter.getActivePollForSlide('slide_0')?.status).toBe('open');
+      const presenterStateOpen = presenter.getViewState();
+      expect(presenterStateOpen.activePoll?.status).toBe('open');
+      const presenterHtml = renderPresenterViewHtml(presenterStateOpen);
+      expect(presenterHtml).toContain('Poll: Should we dive into Advanced Clean Architecture?');
+      expect(presenterHtml).toContain('data-action="close-poll"');
+      expect(presenterHtml).toContain('data-action="reveal-poll"');
+
+      // 3. Receive vote in real-time
+      presenter.handleRealtimeEvent({
+        id: 'evt-poll-vote',
+        type: 'poll.voted',
+        sessionId: 'sess_1',
+        timestamp: new Date().toISOString(),
+        payload: {
+          pollId: 'poll-arch',
+          totalResponses: 1,
+        },
+      });
+
+      const resultsBeforeReveal = presenter.getPollResults('poll-arch');
+      expect(resultsBeforeReveal?.totalResponses).toBe(1);
+      expect(resultsBeforeReveal?.countsByOptionId['opt-yes']).toBe(0);
+
+      // Still unrevealed on projector until presenter explicitly reveals
+      expect(presenter.getProjectorViewState().projectedPollResults).toBeNull();
+
+      // 4. Close poll
+      expect(presenter.closePoll('poll-arch')).toBe(true);
+      expect(presenter.getActivePollForSlide('slide_0')?.status).toBe('closed');
+
+      // 5. Reveal poll results to projector
+      presenter.setPolls(
+        [poll],
+        [
+          {
+            pollId: 'poll-arch',
+            slideId: 'slide_0',
+            status: 'closed',
+            resultsRevealed: false,
+            totalResponses: 1,
+            countsByOptionId: { 'opt-yes': 1, 'opt-no': 0 },
+            question: poll.question,
+            type: poll.type,
+            options: poll.options,
+          },
+        ],
+      );
+      expect(presenter.revealPollResults('poll-arch')).toBe(true);
+      const revealedProjector = presenter.getProjectorViewState();
+      expect(revealedProjector.projectedPoll?.id).toBe('poll-arch');
+      expect(revealedProjector.projectedPollResults?.totalResponses).toBe(1);
+
+      const revealedProjHtml = renderProjectorViewHtml(revealedProjector);
+      expect(revealedProjHtml).toContain('projector-poll-slide');
+      expect(revealedProjHtml).toContain('Should we dive into Advanced Clean Architecture?');
+      expect(revealedProjHtml).toContain('Yes, dive deep');
+      expect(revealedProjHtml).toContain('1 votes (100%)');
+    });
+
+    it('processes external realtime poll events (poll.opened, poll.closed, poll.results)', () => {
+      let subscriberCallCount = 0;
+      const unsubscribe = presenter.subscribe(() => {
+        subscriberCallCount++;
+      });
+
+      // External open event
+      presenter.handleRealtimeEvent({
+        id: 'evt-po-1',
+        type: 'poll.opened',
+        sessionId: 'sess_1',
+        timestamp: new Date().toISOString(),
+        payload: {
+          id: 'poll-ext',
+          slideId: 'slide_0',
+          question: 'Do you prefer TypeScript or JavaScript?',
+          type: 'single',
+          options: [
+            { id: 'opt-ts', label: 'TypeScript' },
+            { id: 'opt-js', label: 'JavaScript' },
+          ],
+          status: 'open',
+          resultsRevealed: false,
+        },
+      });
+
+      expect(subscriberCallCount).toBe(1);
+      const activePoll = presenter.getActivePollForSlide('slide_0');
+      expect(activePoll?.id).toBe('poll-ext');
+      expect(activePoll?.question).toBe('Do you prefer TypeScript or JavaScript?');
+
+      // External results broadcast
+      presenter.handleRealtimeEvent({
+        id: 'evt-pr-1',
+        type: 'poll.results',
+        sessionId: 'sess_1',
+        timestamp: new Date().toISOString(),
+        payload: {
+          pollId: 'poll-ext',
+          results: { 'opt-ts': 42, 'opt-js': 3 },
+          totalVotes: 45,
+          resultsRevealed: true,
+        },
+      });
+
+      expect(subscriberCallCount).toBe(2);
+      const projectorState = presenter.getProjectorViewState();
+      expect(projectorState.projectedPollResults?.countsByOptionId['opt-ts']).toBe(42);
+
+      // External close event
+      presenter.handleRealtimeEvent({
+        id: 'evt-pc-1',
+        type: 'poll.closed',
+        sessionId: 'sess_1',
+        timestamp: new Date().toISOString(),
+        payload: {
+          pollId: 'poll-ext',
+          status: 'closed',
+        },
+      });
+
+      expect(subscriberCallCount).toBe(3);
+      expect(presenter.getPollsForSlide('slide_0').find((p) => p.id === 'poll-ext')?.status).toBe(
+        'closed',
+      );
+
+      unsubscribe();
     });
   });
 });
