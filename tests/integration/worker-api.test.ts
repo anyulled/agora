@@ -47,6 +47,92 @@ describe('Worker HTTP API Integration Tests', () => {
     Authorization: `Bearer ${adminSecret}`,
   };
 
+  it('starts polls closed and validates the target slide and options', async () => {
+    const origin = 'https://api.agora.test/api/v1';
+    const presentationResponse = await app.fetch(
+      new Request(`${origin}/presentations`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'Poll deck',
+          slides: [
+            { id: 'slide-1', title: 'Vote', horizontalIndex: 0, verticalIndex: 0, order: 0 },
+          ],
+        }),
+      }),
+    );
+    const presentation = (await presentationResponse.json()) as Presentation;
+    const sessionResponse = await app.fetch(
+      new Request(`${origin}/presentations/${presentation.id}/sessions`, {
+        method: 'POST',
+        headers: adminHeaders,
+      }),
+    );
+    const session = (await sessionResponse.json()) as PresentationSession & {
+      presenterToken: string;
+    };
+    const endpoint = `${origin}/sessions/${session.id}/polls`;
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-presenter-token': session.presenterToken,
+    };
+    const pollBody = {
+      slideId: 'slide-1',
+      question: 'Ready?',
+      type: 'binary',
+      options: [
+        { id: 'yes', label: 'Yes' },
+        { id: 'no', label: 'No' },
+      ],
+    };
+
+    const wrongSlide = await app.fetch(
+      new Request(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...pollBody, slideId: 'missing' }),
+      }),
+    );
+    expect(wrongSlide.status).toBe(400);
+    const duplicateOptions = await app.fetch(
+      new Request(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...pollBody,
+          options: [
+            { id: 'yes', label: 'Yes' },
+            { id: 'yes', label: 'No' },
+          ],
+        }),
+      }),
+    );
+    expect(duplicateOptions.status).toBe(400);
+    const created = await app.fetch(
+      new Request(endpoint, { method: 'POST', headers, body: JSON.stringify(pollBody) }),
+    );
+    expect(created.status).toBe(201);
+    const poll = (await created.json()) as PollDefinition;
+    expect(poll.status).toBe('draft');
+
+    const joined = await app.fetch(
+      new Request(`${origin}/sessions/${session.id}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      }),
+    );
+    const participant = (await joined.json()) as ParticipantIdentity;
+    const vote = await app.fetch(
+      new Request(`${endpoint}/${poll.id}/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-participant-token': participant.token },
+        body: JSON.stringify({ optionId: 'yes' }),
+      }),
+    );
+    expect(vote.status).toBe(400);
+  });
+
   it('performs presentation CRUD, enforces confirmDestroy, and bumps revision on edits', async () => {
     // 1. Create Presentation
     const createRes = await app.fetch(
@@ -527,6 +613,7 @@ describe('Worker HTTP API Integration Tests', () => {
           slideId: 'slide-poll',
           question: 'Should we dive into Advanced Architecture?',
           type: 'single',
+          status: 'open',
           options: [
             { id: 'opt-yes', label: 'Yes, show advanced' },
             { id: 'opt-no', label: 'No, keep it high level' },
@@ -1999,6 +2086,7 @@ describe('Worker HTTP API Integration Tests', () => {
           slideId: 'slide-poll-1',
           question: 'What is your primary state storage?',
           type: 'single-choice',
+          status: 'open',
           options: [
             { id: 'opt-d1', text: 'Cloudflare D1 SQLite' },
             { id: 'opt-do', text: 'Durable Objects Embedded SQLite' },
@@ -2020,6 +2108,7 @@ describe('Worker HTTP API Integration Tests', () => {
           slideId: 'slide-poll-1',
           question: 'Do you run unit tests in CI on every push?',
           type: 'binary',
+          status: 'open',
           options: [
             { id: 'bin-yes', text: 'Yes' },
             { id: 'bin-no', text: 'No' },
@@ -2039,6 +2128,7 @@ describe('Worker HTTP API Integration Tests', () => {
           slideId: 'slide-poll-2',
           question: 'Which features do you want next?',
           type: 'multiple-choice',
+          status: 'open',
           options: [
             { id: 'm-export', text: 'Slide PNG Export' },
             { id: 'm-charts', text: 'Interactive Charts' },

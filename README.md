@@ -291,7 +291,14 @@ All product features map directly to technical specifications and GitHub issues:
 Run the canonical initialization script to set up dependencies, git hooks, and verification checks:
 ```bash
 ./init.sh
+pnpm dev
 ```
+Open http://127.0.0.1:5173 to create a presentation and start a live session. The
+presenter can create polls for the active slide, open voting, close voting, and reveal
+results. Open the audience and projector links in separate tabs to see the live flow.
+The local API uses persistent SQLite D1 and Durable Object emulation under `.agora-local/`.
+The local admin token defaults to `agora-admin-secret-token` and can be set with
+`AGORA_ADMIN_TOKEN`.
 
 ### Verification & Test Commands
 - **Full Verification Suite** (Lint, Typecheck, Architecture, Tests):

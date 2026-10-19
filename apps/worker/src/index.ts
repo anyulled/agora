@@ -2247,6 +2247,8 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     const pollCreateMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)\/polls$/);
     if (method === 'POST' && pollCreateMatch) {
       const sessionId = pollCreateMatch[1]!;
+      const session = await hydrateSessionFromDO(env, sessionId);
+      if (!session) return errorResponse('Session not found', 404);
       if (!authorizePresenter(request, sessionId)) {
         return errorResponse('Unauthorized: Presenter authentication required', 403);
       }
@@ -2259,50 +2261,53 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         status?: PollStatus;
       };
 
-      if (
-        !body.slideId ||
-        !body.question ||
-        !Array.isArray(body.options) ||
-        body.options.length === 0
-      ) {
+      if (!body.slideId || !body.question || !Array.isArray(body.options)) {
         return errorResponse('slideId, question, and options are required', 400);
       }
-
-      const allowedTypes: PollType[] = [
-        'single',
-        'single-choice',
-        'multiple',
-        'multiple-choice',
-        'binary',
-      ];
-      if (body.type !== undefined && !allowedTypes.includes(body.type)) {
-        return errorResponse('Invalid poll type', 400);
+      await hydratePresentationFromD1(env, session.presentationId);
+      const slides = store.slides.get(session.presentationId) || [];
+      if (!slides.some((slide) => slide.id === body.slideId)) {
+        return errorResponse('Poll slide is not in this presentation', 400);
       }
-      if (body.status !== undefined && body.status !== 'draft' && body.status !== 'open') {
-        return errorResponse("status must be 'draft' or 'open'", 400);
+      const pollType = body.type || 'single-choice';
+      if (
+        !['single', 'single-choice', 'multiple', 'multiple-choice', 'binary'].includes(pollType)
+      ) {
+        return errorResponse('Unsupported poll type', 400);
+      }
+      if (body.options.length < 2 || (pollType === 'binary' && body.options.length !== 2)) {
+        return errorResponse('Poll requires valid options for its type', 400);
       }
       const optionIds = body.options.map((option) => option?.id);
       if (
-        optionIds.some((id) => typeof id !== 'string' || id.trim() === '') ||
+        optionIds.some((id) => typeof id !== 'string' || !id.trim()) ||
         new Set(optionIds).size !== optionIds.length
       ) {
-        return errorResponse('Option IDs must be unique non-empty strings', 400);
+        return errorResponse('Poll option IDs must be unique and non-empty', 400);
       }
+      if (body.status && body.status !== 'open' && body.status !== 'draft') {
+        return errorResponse('Poll must start open or draft', 400);
+      }
+      const question = sanitizeText(body.question);
+      if (!question.trim()) return errorResponse('Poll question is required', 400);
 
       const normalizedOptions: PollOption[] = body.options.map((opt) => ({
         id: opt.id,
-        label: opt.label ?? opt.text ?? opt.id,
+        label: sanitizeText(opt.label ?? opt.text ?? opt.id),
         text: opt.text ?? opt.label,
       }));
+      if (normalizedOptions.some((option) => !option.label.trim())) {
+        return errorResponse('Poll options must have labels', 400);
+      }
 
       const poll: PollDefinition = {
         id: generateSecureId('poll'),
         sessionId,
         slideId: body.slideId,
-        question: sanitizeText(body.question),
-        type: body.type || 'single',
+        question,
+        type: pollType,
         options: normalizedOptions,
-        status: body.status || 'open',
+        status: body.status === 'open' ? 'open' : 'draft',
         resultsRevealed: false,
       };
 
@@ -2333,11 +2338,11 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     );
     if (method === 'POST' && pollStatusMatch) {
       const [, sessionId, pollId, action] = pollStatusMatch;
-      if (!authorizePresenter(request, sessionId!)) {
-        return errorResponse('Unauthorized: Presenter authentication required', 403);
-      }
       if (!(await hydrateSessionFromDO(env, sessionId!))) {
         return errorResponse('Session not found', 404);
+      }
+      if (!authorizePresenter(request, sessionId!)) {
+        return errorResponse('Unauthorized: Presenter authentication required', 403);
       }
 
       const poll = store.polls.get(sessionId!)?.find((item) => item.id === pollId);
@@ -2377,6 +2382,9 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     if (method === 'POST' && pollRevealMatch) {
       const sessionId = pollRevealMatch[1]!;
       const pollId = pollRevealMatch[2]!;
+      if (!(await hydrateSessionFromDO(env, sessionId))) {
+        return errorResponse('Session not found', 404);
+      }
       if (!authorizePresenter(request, sessionId)) {
         return errorResponse('Unauthorized: Presenter authentication required', 403);
       }
@@ -2411,6 +2419,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     if (method === 'POST' && pollVoteMatch) {
       const sessionId = pollVoteMatch[1]!;
       const pollId = pollVoteMatch[2]!;
+      await hydrateSessionFromDO(env, sessionId);
 
       const participant = getParticipantFromToken(request, sessionId);
       if (!participant) {

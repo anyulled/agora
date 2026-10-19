@@ -2,6 +2,7 @@ node_modules/
 dist/
 build/
 .wrangler/
+.agora-local/
 coverage/
 playwright-report/
 test-results/

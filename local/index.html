@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agora Local</title>
+    <style>
+      :root { font-family: system-ui, sans-serif; color: #f8fafc; background: #0f172a; }
+      body { max-width: 900px; margin: auto; padding: 2rem 1rem; }
+      a { color: #93c5fd; }
+      h1 { margin-bottom: .2rem; }
+      .muted { color: #94a3b8; }
+      .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 1.2rem; margin: 1rem 0; }
+      input, textarea, button { font: inherit; border-radius: 6px; padding: .55rem; }
+      input, textarea { background: #0f172a; color: #fff; border: 1px solid #64748b; width: 100%; box-sizing: border-box; margin: .35rem 0 1rem; }
+      button { background: #2563eb; color: #fff; border: 0; cursor: pointer; margin: .2rem; }
+      button:disabled { opacity: .5; cursor: default; }
+      select { background: #0f172a; color: #fff; border: 1px solid #64748b; width: 100%; padding: .55rem; margin: .35rem 0 1rem; }
+      label { display: block; }
+      .row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+      .error { color: #fca5a5; }
+      .slide { font-size: 2rem; min-height: 8rem; display: grid; place-items: center; text-align: center; }
+      .poll-card { background: #172238; }
+      .poll-choice { display: flex; align-items: center; gap: .5rem; min-height: 44px; }
+      .poll-choice input { width: auto; margin: 0; }
+      .poll-result { margin: .75rem 0; }
+      .poll-track { background: #334155; border-radius: 6px; height: .8rem; overflow: hidden; margin-top: .25rem; }
+      .poll-fill { background: #60a5fa; height: 100%; }
+    </style>
+  </head>
+  <body>
+    <header><h1>Agora</h1><p class="muted">Local presentation console</p></header>
+    <main id="app"></main>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>

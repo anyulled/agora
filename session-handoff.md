@@ -1,36 +1,26 @@
-# Agora Session Handoff Document
-
-## Current Worktree
-
-- Issue #19 implementation: `/Users/alrs/Documents/agora-issue-19`
-- Branch: `feat/issue-19-adaptive-navigation`
-
-> Structured session handoff adhering to Harness Engineering Practice 5.
+# Agora Session Handoff
 
 ## Verified Now
-
-- `pnpm run format:check`, `pnpm run lint`, `pnpm run typecheck`, and `pnpm run build` passed.
-- `pnpm run test` passed: 15 test files and 206 tests.
-- `pnpm run harness:victory` passed all three layers.
+- PR #49 contextual polls are implemented in `/Users/alrs/.codex/worktrees/issue-18-polls/agora` on `feat/contextual-polls`.
+- Local presenter, audience, and projector flow was smoke tested, including vote persistence across a local API restart.
+- The base branch now includes issue #19 adaptive navigation: poll closure evaluates rules and offers presenter-confirmed navigation suggestions.
+- After the merge, `./init.sh` passed 209/209 tests and `pnpm run verify` passed all stages.
 
 ## Changed
+- Merged PR #48 commit `2357b90` into PR #49, preserving contextual polls and adaptive navigation.
+- Resolved shared progress and handoff documentation conflicts.
+- Local API rejects malformed request targets and untrusted WebSocket origins; poll rendering uses focused helpers.
 
-- Added D1-persisted, admin-authenticated presentation navigation-rule configuration endpoints.
-- Poll close evaluates matching rules and broadcasts `navigation.suggested` without automatic navigation.
-- Presenter real-time handling displays a suggestion that must be explicitly accepted or dismissed.
-
-## Broken/Unverified
-
-- No known failures.
+## Broken or Unverified
+- GitHub mergeability must be checked after pushing the merge.
 
 ## Next Best Step
+- Push `feat/contextual-polls` and confirm PR #49 is mergeable.
 
-1. Review the isolated worktree commit.
-2. Open a pull request for issue #19.
-
-## Reproducer & Verification Commands
-
+## Reproducer and Verification
 ```bash
-cd /Users/alrs/Documents/agora-issue-19
+cd /Users/alrs/.codex/worktrees/issue-18-polls/agora
+AGORA_WEB_PORT=5174 AGORA_API_PORT=8788 pnpm dev
+./init.sh
 pnpm run verify
 ```

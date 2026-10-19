@@ -323,7 +323,7 @@
       "priority": 9,
       "area": "interactions",
       "title": "Emoji reactions",
-      "user_visible_behavior": "Attendees can trigger emoji reactions (👍, 🤔, ❤️, 😴) against the active slide. Server rate-limits submissions and aggregates counts at 500ms intervals, streaming updates to presenter view without disturbing audience navigation.",
+      "user_visible_behavior": "Attendees can trigger emoji reactions (\ud83d\udc4d, \ud83e\udd14, \u2764\ufe0f, \ud83d\ude34) against the active slide. Server rate-limits submissions and aggregates counts at 500ms intervals, streaming updates to presenter view without disturbing audience navigation.",
       "status": "passing",
       "verification": [
         "vitest run packages/domain/src/__tests__/domain.test.ts",
@@ -369,7 +369,7 @@
           "assertions": 2
         }
       ],
-      "notes": "Includes supported reaction emojis (👍, 🤔, ❤️, 😴), participant token rate limiting (10 req/s), unrevealed slide 403 / SLIDE_NOT_REVEALED rejection, Durable Object 500ms batched aggregation (reaction.summary) preventing WebSocket frame flooding with p95 latency < 1s under 500 concurrent participants, and audience/presenter real-time reaction HUD synchronization."
+      "notes": "Includes supported reaction emojis (\ud83d\udc4d, \ud83e\udd14, \u2764\ufe0f, \ud83d\ude34), participant token rate limiting (10 req/s), unrevealed slide 403 / SLIDE_NOT_REVEALED rejection, Durable Object 500ms batched aggregation (reaction.summary) preventing WebSocket frame flooding with p95 latency < 1s under 500 concurrent participants, and audience/presenter real-time reaction HUD synchronization."
     },
     {
       "id": "SPEC-010",
@@ -378,7 +378,14 @@
       "title": "Contextual polls",
       "user_visible_behavior": "Supports single-choice, multiple-choice, and binary polls anchored to slides. Presenter opens/closes polls and reveals live aggregated results on the projected deck. Responses persist in SQLite with one response per participant rule.",
       "status": "passing",
-      "verification": ["pnpm run verify"],
+      "verification": [
+        "pnpm exec vitest run tests/integration/worker-api.test.ts",
+        "./init.sh",
+        "pnpm run format:check",
+        "pnpm run lint",
+        "pnpm run typecheck",
+        "pnpm run harness:victory"
+      ],
       "evidence": [
         {
           "type": "unit_test",
@@ -434,9 +441,23 @@
               "exitStatus": 0
             }
           ]
+        },
+        {
+          "type": "test_suite",
+          "target": "./init.sh",
+          "timestamp": "2026-10-19T13:25:56Z",
+          "result": "passed",
+          "assertions": 204
+        },
+        {
+          "type": "verification",
+          "target": "./init.sh and pnpm run verify after local API and Sonar fixes",
+          "timestamp": "2026-10-19T14:13:55Z",
+          "result": "passed",
+          "assertions": 206
         }
       ],
-      "notes": "Enforces strict participant voting constraints server-side."
+      "notes": "Presenter can create closed slide-scoped single-choice, multiple-choice, and binary polls, open/close voting, and reveal aggregate results. Audience can vote once per poll; projector receives revealed results. Local API persists D1 and Durable Object SQLite state in .agora-local across restarts. Poll creation validates slide, type, options, and labels."
     },
     {
       "id": "SPEC-011",

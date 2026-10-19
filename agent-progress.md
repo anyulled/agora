@@ -1,5 +1,44 @@
 # Agora Engineering Progress Log
 
+## Session 031 PR #49 base merge — 2026-10-19
+- Merged PR #48 base commit `2357b90` into the contextual-polls branch, preserving both the poll-console progress and issue #19 adaptive-navigation progress.
+- Resolved the shared progress and handoff document conflicts. `./init.sh` passed 209/209 tests; `pnpm run verify` passed format, lint, typecheck, build, 209 tests, and victory detection.
+
+## Session 030 PR security and quality findings — 2026-10-19
+- Hardened the local API boundary by rejecting malformed/absolute request targets and enforcing the configured local browser Origin before WebSocket upgrades. The Worker now receives the same strict local Origin allowlist.
+- Refactored the poll list renderer into focused card, vote, and presenter-control helpers to reduce cognitive complexity. Simplified URL construction and local startup port propagation.
+- Verified hostile WebSocket Origin rejection manually (`403 Forbidden`) and exercised the local API runtime. Default ports were already occupied by another local process, so the smoke used API port 8878 and UI port 5278.
+- `./init.sh` passed: 15/15 files, 206/206 tests. `pnpm run verify` passed formatting, lint, typecheck, all workspace builds, tests, and the three-layer victory detector. Standalone architecture and harness checks passed.
+- GitHub checks and CodeRabbit review are pending a pushed commit.
+
+## Session 029 latest base reconciliation — 2026-10-19
+- Rebasing onto PR #48 commit `93221d5` reconciled poll creation with the base branch's `draft` and `open` creation states. The local composer now creates a draft poll; presenter open/close/reveal controls remain available.
+- Canonical `./init.sh` passed after reconciliation: 15/15 test files and 206/206 tests, plus harness, architecture, lint, and typecheck.
+
+## Session 029 conflict resolution — 2026-10-19
+- Rebasing PR #49 onto `1683070` resolved the Worker poll lifecycle conflict while preserving the base branch's consolidated open/close route and hydrating sessions before authorization.
+- Focused `commitlint` and Worker integration tests passed (22/22). Format, lint, typecheck, and victory detector passed.
+- Two `./init.sh` runs had load-sensitive failures: Mermaid test timeout in the first run; two Cloudflare emulation test timeouts and 500-user join p95 of 679 ms against a 500 ms threshold in the second. These are unverified under current machine load and are not recorded as passes.
+
+## Session 028 completion — 2026-10-19
+- Completed GitHub issue #18 (SPEC-010) in the isolated `issue-18-polls` worktree. Poll creation, presenter controls, audience voting, revealed projector results, and persistent local emulation are implemented.
+- Browser smoke verified closed poll creation, opening, voting, presenter counts, closing, reveal, and audience/projector results. Restart smoke verified session, poll, and vote persistence in `.agora-local`.
+- `pnpm exec vitest run tests/integration/worker-api.test.ts`: 14/14 passed. `./init.sh`: 15/15 files and 204/204 tests passed. `pnpm run format:check`, `pnpm run lint`, and `pnpm run typecheck` passed. Victory detector rerun follows the passing status update.
+- Blockers: none in the isolated worktree. The original checkout remains under concurrent work and was left untouched.
+
+## Session 028 rebase update — 2026-10-19
+- Applied the poll UI and local emulation work onto `c6b415c`, which includes the latest poll privacy fixes.
+- Removed session and participant counts from the public projector view.
+- Hardened poll creation: slide and option validation, explicit closed default, and token hydration before poll actions after restart.
+- Added integration coverage for the closed default and invalid slide/option rejection; existing voting scenarios explicitly open their polls.
+
+## Session 028 — 2026-10-19
+- Working on GitHub issue #18 (SPEC-010) in an isolated worktree because the main checkout entered a concurrent rebase.
+- Added local presenter poll creation/control, audience voting, and projector result views; verification pending.
+- Made local dev ports configurable to test this worktree alongside the existing app server.
+- Rebuilt local dev package wiring after a concurrent stash was removed during the main checkout rebase.
+- Added automatic local D1 migration and reused the configured Worker app across requests so browser poll sessions can persist through API calls.
+- Replaced the local Wrangler API process with the repository's persistent D1 and Durable Object SQLite emulator after a restart smoke test showed Wrangler's binding did not persist sessions.
 ## Session 029 — 2026-10-19
 - Implemented GitHub issue #19 (`SPEC-011: Adaptive navigation`) in the isolated `feat/issue-19-adaptive-navigation` worktree.
 - Added authenticated presentation settings endpoints to list, create, and delete adaptive navigation rules. Rules validate stable source/destination slide IDs, positive vote thresholds, optional percentage thresholds, and exact horizontal/vertical Reveal.js coordinates; D1 hydration/persistence preserves them.
