@@ -433,6 +433,13 @@
           "timestamp": "2026-10-19T14:38:05Z",
           "result": "passed",
           "assertions": 194
+        },
+        {
+          "type": "verification",
+          "target": "pnpm run verify and ./init.sh after reducing PR #51 new-code duplication",
+          "timestamp": "2026-10-19T15:45:30Z",
+          "result": "passed",
+          "assertions": 194
         }
       ],
       "notes": "Presenter and projector session pages are now served by the Worker via /presenter/:sessionId and /projector/:sessionId, with authenticated presenter navigation, keyboard arrow handling, live metrics refresh, and strict projection isolation from private controls."
