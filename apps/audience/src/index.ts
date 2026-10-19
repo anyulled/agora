@@ -589,10 +589,13 @@ export class AudienceAppController {
       throw new Error('Question content cannot be empty');
     }
 
+    // Whole-slide scoping (SPEC-006): Questions reference slideId, never individual fragment steps
+    const canonicalSlideId = activeSlide.id.split(/[#/:]/)[0]!.trim();
+
     const question: AudienceQuestion = {
       id: `q_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       sessionId: this.sessionId,
-      slideId: activeSlide.id,
+      slideId: canonicalSlideId,
       participantId: this.participant.id,
       participantName: displayName?.trim() || this.participant.displayName || 'Anonymous',
       content: trimmed,
@@ -605,6 +608,66 @@ export class AudienceAppController {
     this.questions.push(question);
     this.notifyListeners();
     return question;
+  }
+
+  // SPEC-006: Asynchronous question submission via HTTP API to live backend
+  async submitQuestionToApi(
+    content: string,
+    displayName?: string,
+    fetchFn?: typeof fetch,
+  ): Promise<AudienceQuestion> {
+    const activeSlide = this.getActiveSlide();
+    if (!activeSlide) {
+      throw new Error('Cannot submit question without an active slide');
+    }
+
+    const trimmed = content.trim();
+    if (!trimmed) {
+      throw new Error('Question content cannot be empty');
+    }
+
+    const endpoint = this.wsConfig?.endpoint;
+    const fetcher =
+      fetchFn ?? this.wsConfig?.fetchFn ?? (typeof fetch !== 'undefined' ? fetch : undefined);
+
+    if (!endpoint || !fetcher) {
+      return this.submitQuestion(content, displayName);
+    }
+
+    const cleanEndpoint = endpoint.replace(/\/+$/, '');
+    const canonicalSlideId = activeSlide.id.split(/[#/:]/)[0]!.trim();
+    const resolvedName = displayName?.trim() || this.participant.displayName;
+
+    const res = await fetcher(
+      `${cleanEndpoint}/api/v1/sessions/${encodeURIComponent(this.sessionId)}/questions`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.participant.token}`,
+        },
+        body: JSON.stringify({
+          slideId: canonicalSlideId,
+          content: trimmed,
+          participantName: resolvedName,
+        }),
+      },
+    );
+
+    if (!res.ok) {
+      const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(errBody.error || `Failed to submit question: ${res.statusText}`);
+    }
+
+    const created = (await res.json()) as AudienceQuestion;
+    const idx = this.questions.findIndex((q) => q.id === created.id);
+    if (idx >= 0) {
+      this.questions[idx] = created;
+    } else {
+      this.questions.push(created);
+    }
+    this.notifyListeners();
+    return created;
   }
 
   // SPEC-007: Question upvoting and retracting (one upvote per participant)

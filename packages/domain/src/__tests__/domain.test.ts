@@ -16,6 +16,7 @@ import {
   canDownloadFullPdf,
   canDownloadSlidePng,
   completeSession,
+  createAudienceQuestion,
   createLiveSession,
   createPresentation,
   duplicatePresentation,
@@ -31,6 +32,7 @@ import {
   sortQuestions,
   startScheduledSession,
   toggleQuestionUpvote,
+  updateQuestionStatus,
   validateSlideAccess,
 } from '../index.js';
 
@@ -518,6 +520,35 @@ describe('Domain Logic — SPEC-001 through SPEC-024', () => {
 
       // After window expires (>1000ms), user-1 can consume again
       expect(limiter.consume('user-1', now + 1100)).toBe(true);
+    });
+
+    it('createAudienceQuestion enforces whole-slide scoping and sanitizes input (SPEC-006)', () => {
+      const q = createAudienceQuestion({
+        id: 'q-test-1',
+        sessionId: 'sess-1',
+        slideId: 'slide-arch#fragment-3', // fragment anchor must be stripped
+        participantId: 'p-1',
+        rawContent: '<b>What is the memory limit?</b> <script>alert(1)</script>',
+        rawParticipantName: '<b>Alice</b>',
+      });
+
+      expect(q.id).toBe('q-test-1');
+      expect(q.slideId).toBe('slide-arch'); // whole-slide scoping: no fragment
+      expect(q.content).toBe('What is the memory limit?');
+      expect(q.participantName).toBe('Alice');
+      expect(q.status).toBe('pending');
+      expect(q.upvotes).toBe(0);
+
+      // Status updates
+      const answered = updateQuestionStatus(q, 'answered');
+      expect(answered.status).toBe('answered');
+
+      const dismissed = updateQuestionStatus(q, 'dismissed');
+      expect(dismissed.status).toBe('dismissed');
+
+      expect(() => updateQuestionStatus(q, 'invalid' as unknown as 'pending')).toThrow(
+        'Invalid question status',
+      );
     });
   });
 

@@ -1065,6 +1065,9 @@
                   },
                   "content": {
                     "type": "string"
+                  },
+                  "participantName": {
+                    "type": "string"
                   }
                 }
               }

@@ -509,4 +509,160 @@ describe('Cloudflare Local Emulation Integration Tests', () => {
 
     env.close();
   });
+
+  it('persists and hydrates questions in Durable Object embedded SQLite across worker restarts (SPEC-006)', async () => {
+    const env = createLocalCloudflareEnv({ persistDir: tmpDir, adminToken: 'qa-admin-secret' });
+    const app = createAgoraWorkerApp({ adminToken: env.ADMIN_TOKEN });
+
+    // 1. Create presentation & session
+    const presRes = await app.fetch(
+      new Request('http://localhost/api/v1/presentations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${env.ADMIN_TOKEN}`,
+        },
+        body: JSON.stringify({
+          title: 'DO SQLite Resilience',
+          endingSlideId: 's-end',
+          slides: [
+            {
+              id: 's-1',
+              presentationId: 'p1',
+              title: 'Intro',
+              horizontalIndex: 0,
+              verticalIndex: 0,
+              order: 0,
+            },
+            {
+              id: 's-end',
+              presentationId: 'p1',
+              title: 'Outro',
+              horizontalIndex: 1,
+              verticalIndex: 0,
+              order: 1,
+            },
+          ],
+        }),
+      }),
+      env,
+    );
+    expect(presRes.status).toBe(201);
+    const pres = (await presRes.json()) as { id: string };
+
+    const sessRes = await app.fetch(
+      new Request(`http://localhost/api/v1/presentations/${pres.id}/sessions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${env.ADMIN_TOKEN}`,
+        },
+        body: JSON.stringify({ status: 'live' }),
+      }),
+      env,
+    );
+    expect(sessRes.status).toBe(201);
+    const session = (await sessRes.json()) as { id: string; presenterToken: string };
+
+    // 2. Join participant
+    const joinRes = await app.fetch(
+      new Request(`http://localhost/api/v1/sessions/${session.id}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Charlie' }),
+      }),
+      env,
+    );
+    expect(joinRes.status).toBe(201);
+    const participant = (await joinRes.json()) as { id: string; token: string };
+
+    // 3. Submit question
+    const qRes = await app.fetch(
+      new Request(`http://localhost/api/v1/sessions/${session.id}/questions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${participant.token}`,
+        },
+        body: JSON.stringify({
+          slideId: 's-1#frag-1',
+          content: 'Does embedded SQLite survive Worker cold starts?',
+          participantName: 'Charlie Brown',
+        }),
+      }),
+      env,
+    );
+    expect(qRes.status).toBe(201);
+    const q = (await qRes.json()) as {
+      id: string;
+      slideId: string;
+      status: string;
+      upvotes: number;
+    };
+    expect(q.slideId).toBe('s-1');
+    expect(q.status).toBe('pending');
+
+    // 4. Upvote question
+    const upvoteRes = await app.fetch(
+      new Request(`http://localhost/api/v1/sessions/${session.id}/questions/${q.id}/upvote`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${participant.token}` },
+      }),
+      env,
+    );
+    expect(upvoteRes.status).toBe(200);
+
+    // 5. Presenter marks question answered
+    const patchRes = await app.fetch(
+      new Request(`http://localhost/api/v1/sessions/${session.id}/questions/${q.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.presenterToken}`,
+        },
+        body: JSON.stringify({ status: 'answered' }),
+      }),
+      env,
+    );
+    expect(patchRes.status).toBe(200);
+
+    // Verify row directly in DO SQLite storage
+    const doId = env.SESSION_COORDINATOR.idFromName(session.id);
+    const doState = env.SESSION_COORDINATOR.getState(doId);
+    const rows = doState.storage.sql
+      .exec<{ id: string; status: string; upvotes: number }>(
+        'SELECT id, status, upvotes FROM questions WHERE id = ?',
+        q.id,
+      )
+      .toArray();
+    expect(rows).toEqual([{ id: q.id, status: 'answered', upvotes: 1 }]);
+
+    // 6. Cold restart: instantiate fresh app with empty in-memory store
+    const restartedApp = createAgoraWorkerApp({ adminToken: env.ADMIN_TOKEN });
+    expect(restartedApp.store.questions.size).toBe(0);
+
+    // 7. Query questions on restarted app -> hydrates from DO SQLite
+    const listRes = await restartedApp.fetch(
+      new Request(`http://localhost/api/v1/sessions/${session.id}/questions`),
+      env,
+    );
+    expect(listRes.status).toBe(200);
+    const loadedList = (await listRes.json()) as Array<{
+      id: string;
+      slideId: string;
+      content: string;
+      status: string;
+      upvotes: number;
+      participantName: string;
+    }>;
+    expect(loadedList).toHaveLength(1);
+    expect(loadedList[0]?.id).toBe(q.id);
+    expect(loadedList[0]?.slideId).toBe('s-1');
+    expect(loadedList[0]?.content).toBe('Does embedded SQLite survive Worker cold starts?');
+    expect(loadedList[0]?.participantName).toBe('Charlie Brown');
+    expect(loadedList[0]?.status).toBe('answered');
+    expect(loadedList[0]?.upvotes).toBe(1);
+
+    env.close();
+  });
 });

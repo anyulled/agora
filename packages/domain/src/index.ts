@@ -614,6 +614,62 @@ export function sanitizeAndValidateQuestion(
   };
 }
 
+export interface CreateQuestionParams {
+  id: string;
+  sessionId: string;
+  slideId: string;
+  participantId: string;
+  rawContent: string;
+  rawParticipantName?: string;
+  createdAt?: string;
+}
+
+/**
+ * Creates an AudienceQuestion with whole-slide scoping, input sanitization,
+ * character bounds enforcement, and optional participant name (SPEC-006, SPEC-018).
+ */
+export function createAudienceQuestion(params: CreateQuestionParams): AudienceQuestion {
+  const { content, participantName } = sanitizeAndValidateQuestion(
+    params.rawContent,
+    params.rawParticipantName,
+  );
+
+  // Scoped to whole slide ID, stripping any fragment anchors/indices (#frag or :step)
+  const canonicalSlideId = params.slideId.split(/[#/:]/)[0]!.trim();
+  if (!canonicalSlideId) {
+    throw new Error('Slide ID cannot be empty');
+  }
+
+  return {
+    id: params.id,
+    sessionId: params.sessionId,
+    slideId: canonicalSlideId,
+    participantId: params.participantId,
+    participantName,
+    content,
+    status: 'pending',
+    upvotes: 0,
+    upvotedByParticipantIds: [],
+    createdAt: params.createdAt ?? new Date().toISOString(),
+  };
+}
+
+/**
+ * Updates the status of an audience question (pending -> answered | dismissed) (SPEC-006).
+ */
+export function updateQuestionStatus(
+  question: AudienceQuestion,
+  newStatus: 'pending' | 'answered' | 'dismissed',
+): AudienceQuestion {
+  if (!['pending', 'answered', 'dismissed'].includes(newStatus)) {
+    throw new Error(`Invalid question status: ${newStatus}`);
+  }
+  return {
+    ...question,
+    status: newStatus,
+  };
+}
+
 /**
  * Enforces one upvote per participant per question and allows retracting (SPEC-007).
  */

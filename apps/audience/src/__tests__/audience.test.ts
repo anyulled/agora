@@ -536,6 +536,99 @@ describe('AudienceAppController (SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-00
       audience.toggleUpvoteQuestion(q.id);
       expect(q.upvotes).toBe(1);
     });
+
+    it('rejects empty question content', () => {
+      expect(() => audience.submitQuestion('')).toThrow('Question content cannot be empty');
+      expect(() => audience.submitQuestion('   ')).toThrow('Question content cannot be empty');
+    });
+
+    it('submits question to API via submitQuestionToApi and updates reactive listeners (SPEC-006)', async () => {
+      const mockFetch = async (url: string, init?: RequestInit) => {
+        expect(url).toContain('/api/v1/sessions/sess_123/questions');
+        expect(init?.method).toBe('POST');
+        const body = JSON.parse(init?.body as string);
+        expect(body.slideId).toBe('s1');
+        expect(body.content).toBe('How is hydration handled?');
+        expect(body.participantName).toBe('David');
+
+        return new Response(
+          JSON.stringify({
+            id: 'q-api-1',
+            sessionId: 'sess_123',
+            slideId: 's1',
+            participantId: audience.getParticipant().id,
+            participantName: 'David',
+            content: 'How is hydration handled?',
+            status: 'pending',
+            upvotes: 0,
+            createdAt: new Date().toISOString(),
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
+
+      audience.connectWebSocket({
+        sessionId: 'sess_123',
+        endpoint: 'https://api.agora.test',
+        fetchFn: mockFetch as unknown as typeof fetch,
+        webSocketFactory: () => ({ send: () => {}, close: () => {} }),
+      });
+
+      const q = await audience.submitQuestionToApi('How is hydration handled?', 'David');
+      expect(q.id).toBe('q-api-1');
+      expect(q.content).toBe('How is hydration handled?');
+
+      const vm = audience.getViewModel();
+      expect(vm.questions.some((item) => item.id === 'q-api-1')).toBe(true);
+    });
+
+    it('handles real-time question.submitted and question.updated events (SPEC-006)', () => {
+      let notifiedCount = 0;
+      audience.subscribe(() => {
+        notifiedCount += 1;
+      });
+
+      const initialCount = notifiedCount;
+
+      // Broadcast question.submitted on active slide s1
+      audience.handleRealtimeEvent({
+        id: 'evt-q-sub',
+        type: 'question.submitted',
+        sessionId: 'sess_123',
+        timestamp: new Date().toISOString(),
+        payload: {
+          id: 'q-live-1',
+          sessionId: 'sess_123',
+          slideId: 's1',
+          participantId: 'p-remote',
+          participantName: 'Remote User',
+          content: 'Is SQLite embedded?',
+          status: 'pending',
+          upvotes: 0,
+          createdAt: new Date().toISOString(),
+        },
+      });
+
+      expect(notifiedCount).toBeGreaterThan(initialCount);
+      let found = audience.getViewModel().questions.find((q) => q.id === 'q-live-1');
+      expect(found).toBeDefined();
+      expect(found?.status).toBe('pending');
+
+      // Broadcast question.updated (marked answered by presenter)
+      audience.handleRealtimeEvent({
+        id: 'evt-q-upd',
+        type: 'question.updated',
+        sessionId: 'sess_123',
+        timestamp: new Date().toISOString(),
+        payload: {
+          ...found!,
+          status: 'answered',
+        },
+      });
+
+      found = audience.getViewModel().questions.find((q) => q.id === 'q-live-1');
+      expect(found?.status).toBe('answered');
+    });
   });
 
   describe('Emoji Reactions (SPEC-009)', () => {

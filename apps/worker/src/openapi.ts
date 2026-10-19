@@ -359,7 +359,11 @@ export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
         requestBody: jsonBody({
           type: 'object',
           required: ['slideId', 'content'],
-          properties: { slideId: { type: 'string' }, content: { type: 'string' } },
+          properties: {
+            slideId: { type: 'string' },
+            content: { type: 'string' },
+            participantName: { type: 'string' },
+          },
         }),
         responses: {
           '201': jsonRes('Created question', ref('AudienceQuestion')),

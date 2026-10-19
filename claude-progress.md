@@ -240,5 +240,46 @@
   - `pnpm test` and `./init.sh`: 13/13 test suites (150 tests) passing, 0 ESLint warnings, 0 typecheck errors, 1.5% code duplication (`<= 10%`).
   - `pnpm run harness:victory`: 🏆 Victory Detected (Layer 1, Layer 2, Layer 3 passing).
 
+---
+
+## Session 014 — 2026-10-19
+- **Role**: Q&A Systems & Persistence Engineer (`#12 SPEC-006`)
+- **Goals**:
+  1. Implement `#12 SPEC-006: Slide-scoped questions` (Priority 6 in `feature_list.json`):
+     - Audience can submit slide-contextual questions in either Follow or Solo mode.
+     - Associate questions with whole slide ID, stripping/ignoring fragment indices.
+     - Participant name optional; validate and sanitize question content and name against XSS payloads and length limits.
+     - Enforce per-participant sliding window rate limiting.
+     - Persist questions in Durable Object embedded SQLite `questions` and `question_upvotes` tables and hydrate across worker cold restarts.
+     - Presenter can mark question status as `answered` or `dismissed` via authenticated PATCH route.
+     - Broadcast real-time `question.submitted` and `question.updated` WebSocket events to all session clients.
+- **Completed**:
+  - Added pure domain entities in `packages/domain/src/index.ts`:
+    - `createAudienceQuestion`: whole-slide scoping (`slideId.split(/[#/:]/)[0]`), XSS stripping, content validation, character limits.
+    - `updateQuestionStatus`: status transition validation (`pending` -> `answered` | `dismissed`).
+  - Implemented `AudienceAppController` question workflow in `apps/audience/src/index.ts`:
+    - Added whole-slide scoping in `submitQuestion`.
+    - Added asynchronous `submitQuestionToApi` connecting to backend HTTP API with participant token.
+    - Real-time `question.submitted` and `question.updated` handling with subscriber notifications.
+  - Implemented `PresenterAppController` question workflow in `apps/presenter/src/index.ts`:
+    - Added `updateQuestionStatusViaApi` to update question status to `answered` or `dismissed` with presenter auth.
+  - Implemented backend and persistence in `apps/worker/src/index.ts`:
+    - `persistQuestionToDO`: stores questions in Durable Object embedded SQLite `questions` table.
+    - `updateQuestionStatusInDO`: updates question status in DO SQLite.
+    - `hydrateSessionFromDO`: hydrates questions and upvotes from DO SQLite on cold start.
+    - `POST /api/v1/sessions/:id/questions`: input sanitization, whole-slide scoping, rate limits, 403 for unrevealed slides, DO SQLite persistence, and `question.submitted` WebSocket broadcasting.
+    - `PATCH /api/v1/sessions/:id/questions/:questionId`: presenter moderation, DO SQLite persistence, and `question.updated` WebSocket broadcasting.
+    - Updated OpenAPI 3.1.0 specifications (`apps/worker/src/openapi.ts` and `docs/openapi.json`) with `participantName`.
+  - Added test coverage in:
+    - `packages/domain/src/__tests__/domain.test.ts` (30 tests)
+    - `apps/audience/src/__tests__/audience.test.ts` (28 tests)
+    - `apps/presenter/src/__tests__/presenter.test.ts` (17 tests)
+    - `tests/integration/cloudflare-emulation.test.ts` (6 tests)
+    - `tests/integration/worker-api.test.ts` (9 tests)
+  - Closed GitHub issue #12 (`SPEC-006: Slide-scoped questions`).
+- **Verification Evidence**:
+  - `pnpm test`, `./init.sh`, and `pnpm run verify`: 13/13 test suites (156 tests) passing, 0 ESLint warnings, 0 typecheck errors, 1.4% code duplication (`<= 10%`).
+  - `pnpm run harness:victory`: 🏆 Victory Detected (Layer 1, Layer 2, Layer 3 passing).
+
 
 

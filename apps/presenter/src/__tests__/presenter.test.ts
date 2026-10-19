@@ -288,9 +288,45 @@ describe('PresenterAppController (SPEC-008, SPEC-011, SPEC-012, SPEC-023)', () =
       expect(presenter.getQaState().selectedQuestionId).toBeNull();
     });
 
-    it('marks question status as answered or dismissed', () => {
+    it('marks question status as answered or dismissed (SPEC-006)', async () => {
       presenter.markQuestionStatus('q1', 'answered');
       expect(presenter.getQuestions().find((q) => q.id === 'q1')?.status).toBe('answered');
+
+      const mockFetch = async (url: string, init?: RequestInit) => {
+        expect(url).toContain('/api/v1/sessions/sess_1/questions/q1');
+        expect(init?.method).toBe('PATCH');
+        expect(init?.headers).toEqual({
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-presenter-tok',
+        });
+        const body = JSON.parse(init?.body as string);
+        expect(body.status).toBe('dismissed');
+
+        return new Response(
+          JSON.stringify({
+            id: 'q1',
+            sessionId: 'sess_1',
+            slideId: 'slide_1',
+            participantId: 'p_alice',
+            participantName: 'Alice',
+            content: 'How does gossip protocol scale?',
+            status: 'dismissed',
+            upvotes: 8,
+            createdAt: '2026-10-18T20:00:00Z',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
+
+      const updated = await presenter.updateQuestionStatusViaApi(
+        'https://api.agora.test',
+        'q1',
+        'dismissed',
+        'test-presenter-tok',
+        mockFetch as unknown as typeof fetch,
+      );
+      expect(updated.status).toBe('dismissed');
+      expect(presenter.getQuestions().find((q) => q.id === 'q1')?.status).toBe('dismissed');
     });
   });
 

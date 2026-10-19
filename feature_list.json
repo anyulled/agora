@@ -179,19 +179,50 @@
       "user_visible_behavior": "Audience can submit questions anchored to the currently viewed slide in either Follow or Solo mode. Questions target whole slide (not fragments). Optional participant name, sanitized text, server-side rate limits, and persistence with status pending/answered/dismissed.",
       "status": "passing",
       "verification": [
-        "vitest run packages/domain/tests/question.test.ts",
-        "vitest run apps/worker/tests/questions-api.test.ts"
+        "vitest run packages/domain/src/__tests__/domain.test.ts",
+        "vitest run apps/audience/src/__tests__/audience.test.ts",
+        "vitest run apps/presenter/src/__tests__/presenter.test.ts",
+        "vitest run tests/integration/cloudflare-emulation.test.ts",
+        "vitest run tests/integration/worker-api.test.ts"
       ],
       "evidence": [
         {
           "type": "unit_test",
-          "target": "packages/domain/tests/question.test.ts",
-          "timestamp": "2026-10-18T20:44:34Z",
+          "target": "packages/domain/src/__tests__/domain.test.ts",
+          "timestamp": "2026-10-19T09:04:47Z",
+          "result": "passed",
+          "assertions": 30
+        },
+        {
+          "type": "unit_test",
+          "target": "apps/audience/src/__tests__/audience.test.ts",
+          "timestamp": "2026-10-19T09:04:47Z",
+          "result": "passed",
+          "assertions": 28
+        },
+        {
+          "type": "unit_test",
+          "target": "apps/presenter/src/__tests__/presenter.test.ts",
+          "timestamp": "2026-10-19T09:04:47Z",
+          "result": "passed",
+          "assertions": 17
+        },
+        {
+          "type": "integration_test",
+          "target": "tests/integration/cloudflare-emulation.test.ts",
+          "timestamp": "2026-10-19T09:04:47Z",
+          "result": "passed",
+          "assertions": 6
+        },
+        {
+          "type": "integration_test",
+          "target": "tests/integration/worker-api.test.ts",
+          "timestamp": "2026-10-19T09:04:47Z",
           "result": "passed",
           "assertions": 9
         }
       ],
-      "notes": "Questions are scoped to slide ID, not fragment index."
+      "notes": "Includes whole-slide scoping stripping fragment anchors, XSS sanitization and length validation via domain createAudienceQuestion, optional participant name, per-participant rate limits, Durable Object embedded SQLite persistence and hydration across restarts, presenter moderation via updateQuestionStatus (answered/dismissed), and real-time WebSocket event broadcasting (question.submitted, question.updated)."
     },
     {
       "id": "SPEC-007",

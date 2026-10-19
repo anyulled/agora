@@ -1096,4 +1096,295 @@ describe('Worker HTTP API Integration Tests', () => {
     // 10. Confirm speaker and session remain unaffected
     expect(app.store.sessions.get(session.id)?.currentSlideId).toBe('s-architecture');
   });
+
+  it('implements SPEC-006 Slide-scoped questions with whole-slide scoping, sanitization, rate limits, and presenter moderation', async () => {
+    // 1. Create Presentation & Live Session
+    const presRes = await app.fetch(
+      new Request('https://api.agora.test/api/v1/presentations', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'Clean Architecture in TypeScript',
+          endingSlideId: 's-end',
+          slides: [
+            {
+              id: 's-intro',
+              presentationId: 'p-qa',
+              title: 'Intro',
+              horizontalIndex: 0,
+              verticalIndex: 0,
+              order: 0,
+            },
+            {
+              id: 's-clean',
+              presentationId: 'p-qa',
+              title: 'Clean Architecture',
+              horizontalIndex: 1,
+              verticalIndex: 0,
+              order: 1,
+            },
+            {
+              id: 's-end',
+              presentationId: 'p-qa',
+              title: 'Conclusion',
+              horizontalIndex: 2,
+              verticalIndex: 0,
+              order: 2,
+            },
+          ],
+        }),
+      }),
+    );
+    expect(presRes.status).toBe(201);
+    const pres = (await presRes.json()) as Presentation;
+
+    const sessionRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/presentations/${pres.id}/sessions`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({ status: 'live' }),
+      }),
+    );
+    expect(sessionRes.status).toBe(201);
+    const session = (await sessionRes.json()) as PresentationSession & { presenterToken: string };
+
+    // 2. Join Participants
+    const p1Res = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Alice' }),
+      }),
+    );
+    const p1 = (await p1Res.json()) as ParticipantIdentity;
+
+    const p2Res = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Bob' }),
+      }),
+    );
+    const p2 = (await p2Res.json()) as ParticipantIdentity;
+
+    // 3. Connect presenter & audience to WebSocket to verify real-time events
+    const receivedEvents: string[] = [];
+    const coordinator = app.getCoordinator(session.id);
+    const mockWs = {
+      readyState: 1,
+      send: (msg: string) => {
+        try {
+          const parsed = JSON.parse(msg);
+          receivedEvents.push(parsed.type);
+        } catch {
+          // ignore
+        }
+      },
+      close: () => {},
+    } as unknown as WebSocket;
+    coordinator.handleConnection(mockWs, '*');
+
+    // 4. Whole-slide scoping & input sanitization:
+    // Pass fragment index `s-intro#fragment-2` -> must be anchored to whole slide `s-intro`
+    // Pass raw HTML with script tag -> script tag and html stripped
+    const q1Res = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${p1.token}`,
+        },
+        body: JSON.stringify({
+          slideId: 's-intro#fragment-2',
+          content: '<b>What is the memory footprint?</b> <script>alert(1)</script>',
+          participantName: '<i>Alice M.</i>',
+        }),
+      }),
+    );
+    expect(q1Res.status).toBe(201);
+    const q1 = (await q1Res.json()) as AudienceQuestion;
+    expect(q1.id).toBeDefined();
+    expect(q1.slideId).toBe('s-intro'); // whole-slide scoping verified
+    expect(q1.content).toBe('What is the memory footprint?'); // XSS stripped
+    expect(q1.participantName).toBe('Alice M.'); // participant name sanitized
+    expect(q1.status).toBe('pending');
+    expect(q1.upvotes).toBe(0);
+    expect(receivedEvents).toContain('question.submitted');
+
+    // 5. Submit question defaulting to participant's registered displayName
+    const q2Res = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${p2.token}`,
+        },
+        body: JSON.stringify({
+          slideId: 's-intro',
+          content: 'How do you test Durable Objects locally?',
+        }),
+      }),
+    );
+    expect(q2Res.status).toBe(201);
+    const q2 = (await q2Res.json()) as AudienceQuestion;
+    expect(q2.participantName).toBe('Bob');
+
+    // 6. Validation: reject empty content after sanitization
+    const emptyQRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${p1.token}`,
+        },
+        body: JSON.stringify({
+          slideId: 's-intro',
+          content: '<p>   <script>alert("xss")</script>   </p>',
+        }),
+      }),
+    );
+    expect(emptyQRes.status).toBe(400);
+
+    // 7. Validation: reject question on unrevealed slide (s-clean is not yet revealed)
+    const unrevealedQRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${p1.token}`,
+        },
+        body: JSON.stringify({
+          slideId: 's-clean',
+          content: 'Is this revealed?',
+        }),
+      }),
+    );
+    expect(unrevealedQRes.status).toBe(403);
+
+    // 8. Presenter navigates to reveal s-clean
+    coordinator.handleMessage(
+      {} as WebSocket,
+      JSON.stringify({
+        type: 'slide.changed',
+        sessionId: session.id,
+        token: session.presenterToken,
+        payload: {
+          slideId: 's-clean',
+          horizontalIndex: 1,
+          verticalIndex: 0,
+          timestamp: new Date().toISOString(),
+        },
+      }),
+      session.presenterToken,
+    );
+
+    // Now question on s-clean succeeds
+    const q3Res = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${p1.token}`,
+        },
+        body: JSON.stringify({
+          slideId: 's-clean',
+          content: 'Can domain import application services?',
+        }),
+      }),
+    );
+    expect(q3Res.status).toBe(201);
+    const q3 = (await q3Res.json()) as AudienceQuestion;
+    expect(q3.slideId).toBe('s-clean');
+
+    // 9. Query questions filtered by slideId
+    const filterRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions?slideId=s-intro`),
+    );
+    expect(filterRes.status).toBe(200);
+    const introQuestions = (await filterRes.json()) as AudienceQuestion[];
+    expect(introQuestions).toHaveLength(2);
+    expect(introQuestions.every((q) => q.slideId === 's-intro')).toBe(true);
+
+    // 10. Presenter moderation: mark question answered or dismissed
+    // Unauthorized attempt returns 403
+    const unauthPatch = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions/${q1.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${p1.token}`, // attendee token cannot moderate
+        },
+        body: JSON.stringify({ status: 'answered' }),
+      }),
+    );
+    expect(unauthPatch.status).toBe(403);
+
+    // Authorized presenter marks answered
+    const patchAnswered = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions/${q1.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.presenterToken}`,
+        },
+        body: JSON.stringify({ status: 'answered' }),
+      }),
+    );
+    expect(patchAnswered.status).toBe(200);
+    const answeredQ1 = (await patchAnswered.json()) as AudienceQuestion;
+    expect(answeredQ1.status).toBe('answered');
+    expect(receivedEvents).toContain('question.updated');
+
+    // Authorized presenter marks dismissed
+    const patchDismissed = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions/${q2.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.presenterToken}`,
+        },
+        body: JSON.stringify({ status: 'dismissed' }),
+      }),
+    );
+    expect(patchDismissed.status).toBe(200);
+    const dismissedQ2 = (await patchDismissed.json()) as AudienceQuestion;
+    expect(dismissedQ2.status).toBe('dismissed');
+
+    // Invalid status returns 400
+    const invalidStatus = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions/${q1.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.presenterToken}`,
+        },
+        body: JSON.stringify({ status: 'invalid-status' }),
+      }),
+    );
+    expect(invalidStatus.status).toBe(400);
+
+    // 11. Rate limiting: verify flood protection
+    // Submit until limit is hit
+    let hitRateLimit = false;
+    for (let i = 0; i < 10; i++) {
+      const res = await app.fetch(
+        new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${p1.token}`,
+          },
+          body: JSON.stringify({
+            slideId: 's-intro',
+            content: `Flood test question ${i}`,
+          }),
+        }),
+      );
+      if (res.status === 429) {
+        hitRateLimit = true;
+        break;
+      }
+    }
+    expect(hitRateLimit).toBe(true);
+  });
 });

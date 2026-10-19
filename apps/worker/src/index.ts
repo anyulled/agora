@@ -24,8 +24,10 @@ import {
 import {
   bumpRevision,
   computePresentationRevisionHash,
+  createAudienceQuestion,
   isSlideRevealed,
   startScheduledSession,
+  updateQuestionStatus,
 } from '@agora/domain';
 import type {
   LocalD1Database,
@@ -271,7 +273,7 @@ export class SessionCoordinatorDO {
     const serialized = JSON.stringify(event);
     for (const socket of this.sockets) {
       try {
-        if (socket.readyState === WebSocket.OPEN) {
+        if (socket.readyState === undefined || socket.readyState === WebSocket.OPEN) {
           socket.send(serialized);
         }
       } catch {
@@ -502,6 +504,43 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     );
   }
 
+  function persistQuestionToDO(env: WorkerEnv | undefined, question: AudienceQuestion): void {
+    const doState = asDO(env, question.sessionId);
+    if (!doState) return;
+
+    doState.storage.sql.exec(
+      `INSERT OR REPLACE INTO questions
+       (id, session_id, slide_id, participant_id, participant_name, content, status, upvotes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      question.id,
+      question.sessionId,
+      question.slideId,
+      question.participantId,
+      question.participantName ?? null,
+      question.content,
+      question.status,
+      question.upvotes ?? 0,
+      question.createdAt,
+    );
+  }
+
+  function updateQuestionStatusInDO(
+    env: WorkerEnv | undefined,
+    sessionId: string,
+    questionId: string,
+    status: 'pending' | 'answered' | 'dismissed',
+  ): void {
+    const doState = asDO(env, sessionId);
+    if (!doState) return;
+
+    doState.storage.sql.exec(
+      'UPDATE questions SET status = ? WHERE id = ? AND session_id = ?',
+      status,
+      questionId,
+      sessionId,
+    );
+  }
+
   async function hydrateSessionFromDO(
     env: WorkerEnv | undefined,
     sessionId: string,
@@ -537,6 +576,46 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     const savedPresenterToken = await doState.storage.get<string>('presenterToken');
     if (savedPresenterToken) {
       store.presenterTokens.set(sessionId, savedPresenterToken);
+    }
+
+    // Hydrate questions from Durable Object embedded SQLite (SPEC-006)
+    const qRows = doState.storage.sql
+      .exec<Record<string, unknown>>(
+        'SELECT * FROM questions WHERE session_id = ? ORDER BY created_at ASC',
+        sessionId,
+      )
+      .toArray();
+
+    const loadedQuestions: AudienceQuestion[] = qRows.map((q) => ({
+      id: String(q.id),
+      sessionId: String(q.session_id),
+      slideId: String(q.slide_id),
+      participantId: String(q.participant_id),
+      participantName: q.participant_name ? String(q.participant_name) : undefined,
+      content: String(q.content),
+      status: (q.status as 'pending' | 'answered' | 'dismissed') || 'pending',
+      upvotes: Number(q.upvotes || 0),
+      createdAt: String(q.created_at),
+    }));
+    store.questions.set(sessionId, loadedQuestions);
+
+    // Hydrate question upvotes
+    const upRows = doState.storage.sql
+      .exec<Record<string, unknown>>(
+        'SELECT question_id, participant_id FROM question_upvotes WHERE session_id = ?',
+        sessionId,
+      )
+      .toArray();
+
+    for (const up of upRows) {
+      const qId = String(up.question_id);
+      const pId = String(up.participant_id);
+      let set = store.questionUpvotes.get(qId);
+      if (!set) {
+        set = new Set();
+        store.questionUpvotes.set(qId, set);
+      }
+      set.add(pId);
     }
 
     const status = (row.status as PresentationSession['status']) || 'live';
@@ -1443,8 +1522,13 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     const questionsMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)\/questions$/);
     if (method === 'GET' && questionsMatch) {
       const sessionId = questionsMatch[1]!;
-      const list = store.questions.get(sessionId) || [];
-      const slideIdFilter = url.searchParams.get('slideId');
+      let list = store.questions.get(sessionId);
+      if (!list || list.length === 0) {
+        await hydrateSessionFromDO(env, sessionId);
+        list = store.questions.get(sessionId) || [];
+      }
+      const rawSlideIdFilter = url.searchParams.get('slideId');
+      const slideIdFilter = rawSlideIdFilter ? rawSlideIdFilter.split(/[#/:]/)[0]!.trim() : null;
       const filtered = slideIdFilter ? list.filter((q) => q.slideId === slideIdFilter) : list;
       return jsonResponse(filtered);
     }
@@ -1460,7 +1544,10 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         return errorResponse('Rate limit exceeded. Please slow down.', 429);
       }
 
-      const session = store.sessions.get(sessionId);
+      let session = store.sessions.get(sessionId);
+      if (!session) {
+        session = (await hydrateSessionFromDO(env, sessionId)) ?? undefined;
+      }
       if (!session) {
         return errorResponse('Session not found', 404);
       }
@@ -1468,37 +1555,39 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       const body = (await request.json().catch(() => ({}))) as {
         slideId?: string;
         content?: string;
+        participantName?: string;
       };
 
-      if (!body.slideId || !body.content) {
+      const rawSlideId =
+        typeof body.slideId === 'string' ? body.slideId.split(/[#/:]/)[0]!.trim() : '';
+
+      if (!rawSlideId || !body.content) {
         return errorResponse('slideId and content are required', 400);
       }
 
-      if (!session.revealedSlideIds.includes(body.slideId)) {
+      if (!session.revealedSlideIds.includes(rawSlideId)) {
         return errorResponse('Slide has not been revealed yet', 403);
       }
 
-      const sanitized = sanitizeText(body.content);
-      if (!sanitized) {
-        return errorResponse('Content cannot be empty after sanitization', 400);
+      let question: AudienceQuestion;
+      try {
+        question = createAudienceQuestion({
+          id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          sessionId,
+          slideId: rawSlideId,
+          participantId: participant.id,
+          rawContent: body.content,
+          rawParticipantName: body.participantName ?? participant.displayName,
+        });
+      } catch (err) {
+        return errorResponse((err as Error).message || 'Invalid question content', 400);
       }
-
-      const question: AudienceQuestion = {
-        id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        sessionId,
-        slideId: body.slideId,
-        participantId: participant.id,
-        participantName: participant.displayName,
-        content: sanitized,
-        status: 'pending',
-        upvotes: 0,
-        createdAt: new Date().toISOString(),
-      };
 
       const qList = store.questions.get(sessionId) || [];
       qList.push(question);
       store.questions.set(sessionId, qList);
 
+      persistQuestionToDO(env, question);
       broadcastRealtimeEvent(sessionId, 'question.submitted', question);
       return jsonResponse(question, 201);
     }
@@ -1537,6 +1626,32 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         userUpvoted = true;
       }
 
+      const doState = asDO(env, sessionId);
+      if (doState) {
+        if (userUpvoted) {
+          doState.storage.sql.exec(
+            `INSERT OR REPLACE INTO question_upvotes (question_id, participant_id, session_id, created_at)
+             VALUES (?, ?, ?, ?)`,
+            questionId,
+            participant.id,
+            sessionId,
+            new Date().toISOString(),
+          );
+        } else {
+          doState.storage.sql.exec(
+            'DELETE FROM question_upvotes WHERE question_id = ? AND participant_id = ?',
+            questionId,
+            participant.id,
+          );
+        }
+        doState.storage.sql.exec(
+          'UPDATE questions SET upvotes = ? WHERE id = ? AND session_id = ?',
+          question.upvotes,
+          questionId,
+          sessionId,
+        );
+      }
+
       broadcastRealtimeEvent(sessionId, 'question.upvoted', {
         questionId,
         upvotes: question.upvotes,
@@ -1564,12 +1679,19 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       const body = (await request.json().catch(() => ({}))) as {
         status?: 'pending' | 'answered' | 'dismissed';
       };
-      if (body.status && ['pending', 'answered', 'dismissed'].includes(body.status)) {
-        question.status = body.status;
+      if (!body.status || !['pending', 'answered', 'dismissed'].includes(body.status)) {
+        return errorResponse("status must be 'pending', 'answered', or 'dismissed'", 400);
       }
 
-      broadcastRealtimeEvent(sessionId, 'question.updated', question);
-      return jsonResponse(question);
+      const updated = updateQuestionStatus(question, body.status);
+      const idx = qList.findIndex((q) => q.id === questionId);
+      if (idx >= 0) {
+        qList[idx] = updated;
+      }
+
+      updateQuestionStatusInDO(env, sessionId, questionId, body.status);
+      broadcastRealtimeEvent(sessionId, 'question.updated', updated);
+      return jsonResponse(updated);
     }
 
     // 16. POST /api/v1/sessions/:id/reactions (Emoji reactions 👍 🤔 ❤️ 😴)

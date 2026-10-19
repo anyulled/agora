@@ -310,6 +310,49 @@ export class PresenterAppController {
     }
   }
 
+  // SPEC-006: Presenter updates question status via backend API (answered / dismissed)
+  async updateQuestionStatusViaApi(
+    endpoint: string,
+    questionId: string,
+    status: QuestionStatus,
+    presenterToken?: string,
+    fetchFn?: typeof fetch,
+  ): Promise<AudienceQuestion> {
+    const fetcher = fetchFn ?? (typeof fetch !== 'undefined' ? fetch : undefined);
+    if (!fetcher) {
+      this.markQuestionStatus(questionId, status);
+      const q = this.questions.find((item) => item.id === questionId);
+      if (!q) throw new Error(`Question ${questionId} not found`);
+      return q;
+    }
+
+    const cleanEndpoint = endpoint.replace(/\/+$/, '');
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (presenterToken) {
+      headers.Authorization = `Bearer ${presenterToken}`;
+    }
+
+    const res = await fetcher(
+      `${cleanEndpoint}/api/v1/sessions/${encodeURIComponent(this.session.id)}/questions/${encodeURIComponent(questionId)}`,
+      {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ status }),
+      },
+    );
+
+    if (!res.ok) {
+      const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(errBody.error || `Failed to update question status: ${res.statusText}`);
+    }
+
+    const updated = (await res.json()) as AudienceQuestion;
+    this.markQuestionStatus(questionId, updated.status);
+    return updated;
+  }
+
   getQaState(): QaSlideControllerState {
     const currentSlide = this.getCurrentSlide();
     const isQa = Boolean(currentSlide?.isQaSlide);
