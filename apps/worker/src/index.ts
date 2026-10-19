@@ -26,6 +26,7 @@ import {
   computePresentationRevisionHash,
   createAudienceQuestion,
   isSlideRevealed,
+  sortQuestions,
   startScheduledSession,
   updateQuestionStatus,
 } from '@agora/domain';
@@ -595,6 +596,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       content: String(q.content),
       status: (q.status as 'pending' | 'answered' | 'dismissed') || 'pending',
       upvotes: Number(q.upvotes || 0),
+      upvotedByParticipantIds: [],
       createdAt: String(q.created_at),
     }));
     store.questions.set(sessionId, loadedQuestions);
@@ -616,6 +618,16 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         store.questionUpvotes.set(qId, set);
       }
       set.add(pId);
+
+      const targetQ = loadedQuestions.find((item) => item.id === qId);
+      if (targetQ) {
+        if (!targetQ.upvotedByParticipantIds) {
+          targetQ.upvotedByParticipantIds = [];
+        }
+        if (!targetQ.upvotedByParticipantIds.includes(pId)) {
+          targetQ.upvotedByParticipantIds.push(pId);
+        }
+      }
     }
 
     const status = (row.status as PresentationSession['status']) || 'live';
@@ -1530,7 +1542,17 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       const rawSlideIdFilter = url.searchParams.get('slideId');
       const slideIdFilter = rawSlideIdFilter ? rawSlideIdFilter.split(/[#/:]/)[0]!.trim() : null;
       const filtered = slideIdFilter ? list.filter((q) => q.slideId === slideIdFilter) : list;
-      return jsonResponse(filtered);
+
+      const rawSortBy = url.searchParams.get('sortBy');
+      const sortBy =
+        rawSortBy === 'time' || rawSortBy === 'created' || rawSortBy === 'createdAt'
+          ? 'time'
+          : 'votes';
+      const rawOrder = url.searchParams.get('order');
+      const order = rawOrder === 'asc' ? 'asc' : 'desc';
+
+      const sorted = sortQuestions(filtered, sortBy, order);
+      return jsonResponse(sorted);
     }
 
     if (method === 'POST' && questionsMatch) {
@@ -1603,15 +1625,30 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         return errorResponse('Unauthorized participant', 401);
       }
 
-      const qList = store.questions.get(sessionId) || [];
+      const session = await hydrateSessionFromDO(env, sessionId);
+      if (!session) {
+        return errorResponse('Session not found', 404);
+      }
+
+      let qList = store.questions.get(sessionId);
+      if (!qList || qList.length === 0) {
+        await hydrateSessionFromDO(env, sessionId);
+        qList = store.questions.get(sessionId) || [];
+      }
+
       const question = qList.find((q) => q.id === questionId);
       if (!question) {
         return errorResponse('Question not found', 404);
       }
 
+      // Authoritative revelation access control: question slide must be revealed (SPEC-005, SPEC-007)
+      if (!isSlideRevealed(session, question.slideId)) {
+        return errorResponse('Slide has not been revealed yet', 403);
+      }
+
       let upvotedSet = store.questionUpvotes.get(questionId);
       if (!upvotedSet) {
-        upvotedSet = new Set();
+        upvotedSet = new Set(question.upvotedByParticipantIds ?? []);
         store.questionUpvotes.set(questionId, upvotedSet);
       }
 
@@ -1625,6 +1662,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         question.upvotes += 1;
         userUpvoted = true;
       }
+      question.upvotedByParticipantIds = Array.from(upvotedSet);
 
       const doState = asDO(env, sessionId);
       if (doState) {
@@ -1654,11 +1692,19 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
 
       broadcastRealtimeEvent(sessionId, 'question.upvoted', {
         questionId,
+        voteCount: question.upvotes,
         upvotes: question.upvotes,
+        participantId: participant.id,
+        hasUpvoted: userUpvoted,
         userUpvoted,
       });
 
-      return jsonResponse({ ...question, userUpvoted });
+      return jsonResponse({
+        ...question,
+        voteCount: question.upvotes,
+        hasUpvoted: userUpvoted,
+        userUpvoted,
+      });
     }
 
     // 15. PATCH /api/v1/sessions/:id/questions/:questionId (Presenter marks answered/dismissed)

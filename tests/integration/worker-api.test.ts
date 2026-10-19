@@ -1387,4 +1387,286 @@ describe('Worker HTTP API Integration Tests', () => {
     }
     expect(hitRateLimit).toBe(true);
   });
+
+  it('implements SPEC-007: idempotent upvoting, vote retraction, WebSocket events, and dynamic sorting', async () => {
+    // 1. Create presentation & session
+    const presRes = await app.fetch(
+      new Request('https://api.agora.test/api/v1/presentations', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'Upvote & Sorting Test Deck',
+          endingSlideId: 's-end',
+          slides: [
+            {
+              id: 's-1',
+              presentationId: 'p-up',
+              title: 'Slide 1',
+              horizontalIndex: 0,
+              verticalIndex: 0,
+              order: 0,
+            },
+            {
+              id: 's-2',
+              presentationId: 'p-up',
+              title: 'Slide 2',
+              horizontalIndex: 1,
+              verticalIndex: 0,
+              order: 1,
+            },
+            {
+              id: 's-end',
+              presentationId: 'p-up',
+              title: 'Ending',
+              horizontalIndex: 2,
+              verticalIndex: 0,
+              order: 2,
+            },
+          ],
+        }),
+      }),
+    );
+    const pres = (await presRes.json()) as Presentation;
+
+    const sessionRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/presentations/${pres.id}/sessions`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({ status: 'live' }),
+      }),
+    );
+    const session = (await sessionRes.json()) as PresentationSession & { presenterToken: string };
+
+    // 2. Join two attendees
+    const joinRes1 = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Alice' }),
+      }),
+    );
+    const p1 = (await joinRes1.json()) as ParticipantIdentity;
+
+    const joinRes2 = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Bob' }),
+      }),
+    );
+    const p2 = (await joinRes2.json()) as ParticipantIdentity;
+
+    // 3. Connect presenter & attendee WebSockets to capture question.upvoted events
+    const receivedEvents: Array<{ type: string; payload: unknown }> = [];
+    const coordinator = app.getCoordinator(session.id);
+    const mockWs = {
+      readyState: 1,
+      send: (rawMsg: string) => {
+        try {
+          const parsed = JSON.parse(rawMsg);
+          receivedEvents.push({ type: parsed.type, payload: parsed.payload });
+        } catch {
+          // ignore non-json websocket frames
+        }
+      },
+      close: () => {},
+    } as unknown as WebSocket;
+    coordinator.handleConnection(mockWs, '*');
+
+    // 4. Submit questions on revealed slide s-1
+    const q1Res = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p1.token}` },
+        body: JSON.stringify({ slideId: 's-1', content: 'Question One: Architecture' }),
+      }),
+    );
+    const q1 = (await q1Res.json()) as AudienceQuestion;
+
+    const q2Res = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p2.token}` },
+        body: JSON.stringify({ slideId: 's-1', content: 'Question Two: Performance' }),
+      }),
+    );
+    const q2 = (await q2Res.json()) as AudienceQuestion;
+
+    // Ensure distinct timestamps for sorting verification
+    q1.createdAt = '2026-10-19T10:00:00.000Z';
+    q2.createdAt = '2026-10-19T10:05:00.000Z';
+    const sList = app.store.questions.get(session.id);
+    if (sList) {
+      const sq1 = sList.find((item) => item.id === q1.id);
+      if (sq1) sq1.createdAt = q1.createdAt;
+      const sq2 = sList.find((item) => item.id === q2.id);
+      if (sq2) sq2.createdAt = q2.createdAt;
+    }
+
+    // 5. Upvote Q1 by Alice (1st upvote)
+    const up1Res = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/questions/${q1.id}/upvote`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${p1.token}` },
+        },
+      ),
+    );
+    expect(up1Res.status).toBe(200);
+    const up1Data = (await up1Res.json()) as AudienceQuestion & {
+      userUpvoted: boolean;
+      voteCount: number;
+      hasUpvoted: boolean;
+    };
+    expect(up1Data.upvotes).toBe(1);
+    expect(up1Data.voteCount).toBe(1);
+    expect(up1Data.userUpvoted).toBe(true);
+    expect(up1Data.hasUpvoted).toBe(true);
+    expect(up1Data.upvotedByParticipantIds).toContain(p1.id);
+
+    // Verify WebSocket event broadcast
+    const upEvent = receivedEvents.find((e) => e.type === 'question.upvoted');
+    expect(upEvent).toBeDefined();
+    expect(upEvent?.payload).toEqual(
+      expect.objectContaining({
+        questionId: q1.id,
+        voteCount: 1,
+        upvotes: 1,
+        participantId: p1.id,
+        hasUpvoted: true,
+        userUpvoted: true,
+      }),
+    );
+
+    // 6. Upvote Q1 by Bob (2nd upvote on Q1)
+    const up2Res = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/questions/${q1.id}/upvote`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${p2.token}` },
+        },
+      ),
+    );
+    expect(up2Res.status).toBe(200);
+    const up2Data = (await up2Res.json()) as AudienceQuestion & { userUpvoted: boolean };
+    expect(up2Data.upvotes).toBe(2);
+    expect(up2Data.upvotedByParticipantIds).toContain(p1.id);
+    expect(up2Data.upvotedByParticipantIds).toContain(p2.id);
+
+    // 7. Retract upvote: Alice calls upvote again on Q1 -> toggles off to 1 vote
+    const retractRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/questions/${q1.id}/upvote`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${p1.token}` },
+        },
+      ),
+    );
+    expect(retractRes.status).toBe(200);
+    const retractData = (await retractRes.json()) as AudienceQuestion & { userUpvoted: boolean };
+    expect(retractData.upvotes).toBe(1);
+    expect(retractData.userUpvoted).toBe(false);
+    expect(retractData.upvotedByParticipantIds).not.toContain(p1.id);
+    expect(retractData.upvotedByParticipantIds).toContain(p2.id);
+
+    // 8. Bob upvotes Q2 twice: 1st adds, 2nd adds more upvotes to test sorting
+    // Give Q2 3 upvotes from a third participant
+    const joinRes3 = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Charlie' }),
+      }),
+    );
+    const p3 = (await joinRes3.json()) as ParticipantIdentity;
+
+    await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/questions/${q2.id}/upvote`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${p1.token}` },
+        },
+      ),
+    );
+    await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/questions/${q2.id}/upvote`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${p2.token}` },
+        },
+      ),
+    );
+    await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/questions/${q2.id}/upvote`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${p3.token}` },
+        },
+      ),
+    );
+
+    // Q2 now has 3 upvotes, Q1 has 1 upvote
+
+    // 9. Query questions sorted by votes (descending default)
+    const listVotesRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions?sortBy=votes`),
+    );
+    expect(listVotesRes.status).toBe(200);
+    const listVotes = (await listVotesRes.json()) as AudienceQuestion[];
+    expect(listVotes).toHaveLength(2);
+    expect(listVotes[0]?.id).toBe(q2.id); // 3 upvotes
+    expect(listVotes[1]?.id).toBe(q1.id); // 1 upvote
+
+    // Query questions sorted by votes ascending
+    const listVotesAscRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/questions?sortBy=votes&order=asc`,
+      ),
+    );
+    expect(listVotesAscRes.status).toBe(200);
+    const listVotesAsc = (await listVotesAscRes.json()) as AudienceQuestion[];
+    expect(listVotesAsc[0]?.id).toBe(q1.id);
+    expect(listVotesAsc[1]?.id).toBe(q2.id);
+
+    // Query questions sorted by time
+    const listTimeRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/questions?sortBy=time`),
+    );
+    expect(listTimeRes.status).toBe(200);
+    const listTime = (await listTimeRes.json()) as AudienceQuestion[];
+    expect(listTime[0]?.id).toBe(q2.id); // q2 created after q1
+
+    // 10. Attempt upvoting question on unrevealed slide returns 403 Forbidden
+    // Manually push a question with unrevealed slideId into session store
+    const unrevealedQ: AudienceQuestion = {
+      id: 'q-secret',
+      sessionId: session.id,
+      slideId: 's-2', // s-2 is not yet revealed
+      participantId: p1.id,
+      content: 'Secret slide question',
+      status: 'pending',
+      upvotes: 0,
+      createdAt: new Date().toISOString(),
+    };
+    const sQuestions = app.store.questions.get(session.id) || [];
+    sQuestions.push(unrevealedQ);
+    app.store.questions.set(session.id, sQuestions);
+
+    const unrevealedUpvoteRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/questions/${unrevealedQ.id}/upvote`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${p1.token}` },
+        },
+      ),
+    );
+    expect(unrevealedUpvoteRes.status).toBe(403);
+  });
 });

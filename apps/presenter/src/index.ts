@@ -7,6 +7,7 @@ import type {
   QuestionStatus,
   Reaction,
   ReactionCounts,
+  RealtimeEvent,
   SlideMetadata,
 } from '@agora/contracts';
 
@@ -284,6 +285,45 @@ export class PresenterAppController {
     this.questions = [...questions];
   }
 
+  // SPEC-006, SPEC-007: Real-time event handler for questions, upvotes, and status changes
+  handleRealtimeEvent(event: RealtimeEvent): void {
+    if (!event || event.sessionId !== this.session.id) return;
+
+    if (event.type === 'question.submitted') {
+      const q = event.payload as AudienceQuestion;
+      if (q?.id) {
+        this.questions = this.questions.filter((item) => item.id !== q.id).concat(q);
+      }
+    } else if (event.type === 'question.updated') {
+      const q = event.payload as AudienceQuestion;
+      const target = this.questions.find((item) => item.id === q?.id);
+      if (target) Object.assign(target, q);
+    } else if (event.type === 'question.upvoted') {
+      const p = event.payload as {
+        questionId?: string;
+        voteCount?: number;
+        upvotes?: number;
+        participantId?: string;
+        hasUpvoted?: boolean;
+        userUpvoted?: boolean;
+      };
+      const q = this.questions.find((item) => item.id === p?.questionId);
+      if (q) {
+        q.upvotes = p.voteCount ?? p.upvotes ?? q.upvotes;
+        const voted = p.hasUpvoted ?? p.userUpvoted;
+        if (p.participantId && typeof voted === 'boolean') {
+          const s = new Set(q.upvotedByParticipantIds ?? []);
+          if (voted) {
+            s.add(p.participantId);
+          } else {
+            s.delete(p.participantId);
+          }
+          q.upvotedByParticipantIds = Array.from(s);
+        }
+      }
+    }
+  }
+
   selectQuestion(questionId: string): boolean {
     const question = this.questions.find((q) => q.id === questionId);
     if (!question) return false;
@@ -385,7 +425,10 @@ export class PresenterAppController {
   getQuestions(sortBy = this.qaSortBy): AudienceQuestion[] {
     const copy = [...this.questions];
     if (sortBy === 'votes') {
-      return copy.sort((a, b) => b.upvotes - a.upvotes);
+      return copy.sort((a, b) => {
+        if (b.upvotes !== a.upvotes) return b.upvotes - a.upvotes;
+        return b.createdAt.localeCompare(a.createdAt);
+      });
     }
     return copy.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }

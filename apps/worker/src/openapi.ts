@@ -345,8 +345,23 @@ export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
       get: {
         tags: ['Questions'],
         operationId: 'listSessionQuestions',
-        summary: 'List questions for session (optionally filtered by slideId)',
-        parameters: [{ name: 'slideId', in: 'query', required: false, schema: { type: 'string' } }],
+        summary:
+          'List questions for session (optionally filtered by slideId, sorted by votes or time)',
+        parameters: [
+          { name: 'slideId', in: 'query', required: false, schema: { type: 'string' } },
+          {
+            name: 'sortBy',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['votes', 'time', 'created'] },
+          },
+          {
+            name: 'order',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['asc', 'desc'] },
+          },
+        ],
         responses: {
           '200': jsonRes('Questions list', { type: 'array', items: ref('AudienceQuestion') }),
         },
@@ -734,6 +749,7 @@ export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
           content: { type: 'string' },
           status: { type: 'string', enum: ['pending', 'answered', 'dismissed'] },
           upvotes: { type: 'integer' },
+          upvotedByParticipantIds: { type: 'array', items: { type: 'string' } },
           createdAt: { type: 'string', format: 'date-time' },
         },
       },

@@ -232,19 +232,50 @@
       "user_visible_behavior": "Audience members can upvote questions (one upvote per participant per question) and retract their upvote. Enforced via composite primary key in SQLite. Live upvote counts propagate instantly to all clients.",
       "status": "passing",
       "verification": [
-        "vitest run packages/domain/tests/upvoting.test.ts",
-        "vitest run apps/worker/tests/upvoting-sqlite.test.ts"
+        "vitest run packages/domain/src/__tests__/domain.test.ts",
+        "vitest run apps/audience/src/__tests__/audience.test.ts",
+        "vitest run apps/presenter/src/__tests__/presenter.test.ts",
+        "vitest run tests/integration/cloudflare-emulation.test.ts",
+        "vitest run tests/integration/worker-api.test.ts"
       ],
       "evidence": [
         {
           "type": "unit_test",
-          "target": "packages/domain/tests/upvoting.test.ts",
-          "timestamp": "2026-10-18T20:44:38Z",
+          "target": "packages/domain/src/__tests__/domain.test.ts",
+          "timestamp": "2026-10-19T10:23:02Z",
           "result": "passed",
-          "assertions": 8
+          "assertions": 30
+        },
+        {
+          "type": "unit_test",
+          "target": "apps/audience/src/__tests__/audience.test.ts",
+          "timestamp": "2026-10-19T10:23:02Z",
+          "result": "passed",
+          "assertions": 31
+        },
+        {
+          "type": "unit_test",
+          "target": "apps/presenter/src/__tests__/presenter.test.ts",
+          "timestamp": "2026-10-19T10:23:02Z",
+          "result": "passed",
+          "assertions": 19
+        },
+        {
+          "type": "integration_test",
+          "target": "tests/integration/cloudflare-emulation.test.ts",
+          "timestamp": "2026-10-19T10:23:02Z",
+          "result": "passed",
+          "assertions": 6
+        },
+        {
+          "type": "integration_test",
+          "target": "tests/integration/worker-api.test.ts",
+          "timestamp": "2026-10-19T10:23:02Z",
+          "result": "passed",
+          "assertions": 10
         }
       ],
-      "notes": "Idempotent upvote toggling backed by Durable Object SQLite."
+      "notes": "Includes single-upvote enforcement with vote retraction, DO SQLite question_upvotes composite primary key (question_id, participant_id), real-time WebSocket question.upvoted broadcast, dynamic question sorting by vote count and creation timestamp across API and client controllers, and slide revelation access control."
     },
     {
       "id": "SPEC-008",

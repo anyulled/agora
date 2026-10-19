@@ -279,12 +279,37 @@ export class AudienceAppController {
       }
 
       case 'question.upvoted': {
-        const payload = event.payload as { questionId?: string; upvotes?: number };
-        if (payload?.questionId && typeof payload.upvotes === 'number') {
-          const q = this.questions.find((item) => item.id === payload.questionId);
-          if (q) {
-            q.upvotes = payload.upvotes;
-            this.notifyListeners();
+        const payload = event.payload as {
+          questionId?: string;
+          voteCount?: number;
+          upvotes?: number;
+          participantId?: string;
+          hasUpvoted?: boolean;
+          userUpvoted?: boolean;
+        };
+        if (payload?.questionId) {
+          const voteCount =
+            typeof payload.voteCount === 'number'
+              ? payload.voteCount
+              : typeof payload.upvotes === 'number'
+                ? payload.upvotes
+                : undefined;
+          if (typeof voteCount === 'number') {
+            const q = this.questions.find((item) => item.id === payload.questionId);
+            if (q) {
+              q.upvotes = voteCount;
+              const hasVoted = payload.hasUpvoted ?? payload.userUpvoted;
+              if (payload.participantId && typeof hasVoted === 'boolean') {
+                const upvoters = new Set(q.upvotedByParticipantIds ?? []);
+                if (hasVoted) {
+                  upvoters.add(payload.participantId);
+                } else {
+                  upvoters.delete(payload.participantId);
+                }
+                q.upvotedByParticipantIds = Array.from(upvoters);
+              }
+              this.notifyListeners();
+            }
           }
         }
         break;
@@ -693,17 +718,77 @@ export class AudienceAppController {
     return question;
   }
 
+  // SPEC-007: Asynchronous upvote toggle via HTTP API to backend
+  async toggleUpvoteQuestionViaApi(
+    questionId: string,
+    fetchFn?: typeof fetch,
+  ): Promise<AudienceQuestion & { userUpvoted: boolean; voteCount: number; hasUpvoted?: boolean }> {
+    const question = this.questions.find((q) => q.id === questionId);
+    if (!question) {
+      throw new Error(`Question ${questionId} not found`);
+    }
+
+    const endpoint = this.wsConfig?.endpoint;
+    const fetcher =
+      fetchFn ?? this.wsConfig?.fetchFn ?? (typeof fetch !== 'undefined' ? fetch : undefined);
+
+    if (!endpoint || !fetcher) {
+      const updated = this.toggleUpvoteQuestion(questionId);
+      const isUpvoted = Boolean(updated.upvotedByParticipantIds?.includes(this.participant.id));
+      return {
+        ...updated,
+        voteCount: updated.upvotes,
+        hasUpvoted: isUpvoted,
+        userUpvoted: isUpvoted,
+      };
+    }
+
+    const cleanEndpoint = endpoint.replace(/\/+$/, '');
+    const res = await fetcher(
+      `${cleanEndpoint}/api/v1/sessions/${encodeURIComponent(this.sessionId)}/questions/${encodeURIComponent(questionId)}/upvote`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.participant.token}`,
+        },
+      },
+    );
+
+    if (!res.ok) {
+      const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(errBody.error || `Failed to toggle question upvote: ${res.statusText}`);
+    }
+
+    const result = (await res.json()) as AudienceQuestion & {
+      userUpvoted: boolean;
+      voteCount: number;
+    };
+    const idx = this.questions.findIndex((q) => q.id === questionId);
+    if (idx >= 0) {
+      this.questions[idx] = {
+        ...this.questions[idx],
+        ...result,
+      };
+    }
+    this.notifyListeners();
+    return result;
+  }
+
+  getQuestions(sortBy: 'votes' | 'time' = 'votes'): AudienceQuestion[] {
+    const list = [...this.questions];
+    if (sortBy === 'votes') {
+      return list.sort((a, b) => {
+        if (b.upvotes !== a.upvotes) return b.upvotes - a.upvotes;
+        return b.createdAt.localeCompare(a.createdAt);
+      });
+    }
+    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
   getQuestionsForActiveSlide(sortBy: 'votes' | 'time' = 'votes'): AudienceQuestion[] {
     const activeId = this.getActiveSlideId();
     if (!activeId) return [];
-
-    const filtered = this.questions.filter((q) => q.slideId === activeId);
-    if (sortBy === 'votes') {
-      return filtered.sort((a, b) => b.upvotes - a.upvotes);
-    }
-    return filtered.sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-    );
+    return this.getQuestions(sortBy).filter((q) => q.slideId === activeId);
   }
 
   // SPEC-009: Emoji reactions (👍 🤔 ❤️ 😴)

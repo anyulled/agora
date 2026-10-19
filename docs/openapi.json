@@ -1013,7 +1013,7 @@
       "get": {
         "tags": ["Questions"],
         "operationId": "listSessionQuestions",
-        "summary": "List questions for session (optionally filtered by slideId)",
+        "summary": "List questions for session (optionally filtered by slideId, sorted by votes or time)",
         "parameters": [
           {
             "name": "slideId",
@@ -1021,6 +1021,24 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "sortBy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["votes", "time", "created"]
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
             }
           }
         ],
@@ -2224,6 +2242,12 @@
           },
           "upvotes": {
             "type": "integer"
+          },
+          "upvotedByParticipantIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "createdAt": {
             "type": "string",

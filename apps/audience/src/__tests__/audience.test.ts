@@ -629,6 +629,89 @@ describe('AudienceAppController (SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-00
       found = audience.getViewModel().questions.find((q) => q.id === 'q-live-1');
       expect(found?.status).toBe('answered');
     });
+
+    it('toggles upvote via toggleUpvoteQuestionViaApi and updates state (SPEC-007)', async () => {
+      const q = audience.submitQuestion('How does replication work?', 'Eve');
+
+      const mockFetch = async (url: string, init?: RequestInit) => {
+        expect(url).toContain(`/api/v1/sessions/sess_123/questions/${q.id}/upvote`);
+        expect(init?.method).toBe('POST');
+        expect(init?.headers).toEqual(
+          expect.objectContaining({ Authorization: `Bearer ${audience.getParticipant().token}` }),
+        );
+
+        return new Response(
+          JSON.stringify({
+            ...q,
+            upvotes: 1,
+            voteCount: 1,
+            userUpvoted: true,
+            hasUpvoted: true,
+            upvotedByParticipantIds: [audience.getParticipant().id],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
+
+      audience.connectWebSocket({
+        sessionId: 'sess_123',
+        endpoint: 'https://api.agora.test',
+        fetchFn: mockFetch as unknown as typeof fetch,
+      });
+
+      const res = await audience.toggleUpvoteQuestionViaApi(q.id);
+      expect(res.upvotes).toBe(1);
+      expect(res.userUpvoted).toBe(true);
+
+      const updated = audience.getQuestionsForActiveSlide().find((item) => item.id === q.id);
+      expect(updated?.upvotes).toBe(1);
+    });
+
+    it('processes question.upvoted real-time WebSocket events and updates vote tallies (SPEC-007)', () => {
+      const q = audience.submitQuestion('Real-time upvote question', 'Frank');
+      expect(q.upvotes).toBe(0);
+
+      audience.handleRealtimeEvent({
+        id: 'evt-q-vote',
+        type: 'question.upvoted',
+        sessionId: 'sess_123',
+        timestamp: new Date().toISOString(),
+        payload: {
+          questionId: q.id,
+          voteCount: 5,
+          upvotes: 5,
+          participantId: 'p-other',
+          hasUpvoted: true,
+        },
+      });
+
+      const updated = audience.getQuestionsForActiveSlide().find((item) => item.id === q.id);
+      expect(updated?.upvotes).toBe(5);
+      expect(updated?.upvotedByParticipantIds).toContain('p-other');
+    });
+
+    it('supports dynamic sorting by vote count and creation timestamp (SPEC-007)', () => {
+      const qAlpha = audience.submitQuestion('Question Alpha', 'User 1');
+      const qBeta = audience.submitQuestion('Question Beta', 'User 2');
+      const qGamma = audience.submitQuestion('Question Gamma', 'User 3');
+
+      qAlpha.createdAt = '2026-10-19T10:00:00.000Z';
+      qBeta.createdAt = '2026-10-19T10:01:00.000Z';
+      qGamma.createdAt = '2026-10-19T10:02:00.000Z';
+
+      audience.toggleUpvoteQuestion(qBeta.id);
+      audience.toggleUpvoteQuestion(qGamma.id);
+      qGamma.upvotes = 10; // artificially boost
+
+      const sortedByVotes = audience.getQuestions('votes');
+      expect(sortedByVotes[0]?.content).toBe('Question Gamma');
+      expect(sortedByVotes[1]?.content).toBe('Question Beta');
+
+      const sortedByTime = audience.getQuestions('time');
+      expect(sortedByTime[0]?.content).toBe('Question Gamma');
+      expect(sortedByTime[1]?.content).toBe('Question Beta');
+      expect(sortedByTime[2]?.content).toBe('Question Alpha');
+    });
   });
 
   describe('Emoji Reactions (SPEC-009)', () => {

@@ -281,5 +281,44 @@
   - `pnpm test`, `./init.sh`, and `pnpm run verify`: 13/13 test suites (156 tests) passing, 0 ESLint warnings, 0 typecheck errors, 1.4% code duplication (`<= 10%`).
   - `pnpm run harness:victory`: 🏆 Victory Detected (Layer 1, Layer 2, Layer 3 passing).
 
+---
+
+## Session 015 — 2026-10-19
+- **Role**: Question Upvoting & Real-Time Sync Engineer (`#13 SPEC-007`)
+- **Goals**:
+  1. Implement `#13 SPEC-007: Question upvoting` (Priority 7 in `feature_list.json`):
+     - Attendees can cast one upvote per question and retract their vote idempotently.
+     - Durable Object embedded SQLite enforces unique vote constraint via composite primary key `(question_id, participant_id)` in `question_upvotes` table.
+     - Real-time vote counts broadcast across WebSockets (`question.upvoted` event with `{ questionId, voteCount, upvotes, participantId, hasUpvoted, userUpvoted }`).
+     - Question list supports dynamic sorting by vote count and creation timestamp across REST API (`GET /api/v1/sessions/:id/questions?sortBy=votes|time&order=asc|desc`) and client controllers.
+     - Slide revelation access control: upvoting questions on unrevealed slides returns `403 Forbidden`.
+  2. Answer user inquiry regarding running the application locally for a demo.
+- **Completed**:
+  - Added `QuestionUpvote` and `QuestionUpvotedPayload` interfaces to `@agora/contracts`.
+  - Added `isQuestionUpvotedBy` and enhanced `sortQuestions` with `order` ('asc' | 'desc') in `@agora/domain`.
+  - Updated `AudienceAppController` in `apps/audience/src/index.ts`:
+    - Added `toggleUpvoteQuestionViaApi` to call backend `POST .../questions/:id/upvote` with auth token.
+    - Updated `handleRealtimeEvent` on `question.upvoted` to track `upvotes` and `upvotedByParticipantIds`.
+    - Added `getQuestions(sortBy)` and refactored `getQuestionsForActiveSlide` for dynamic sorting without DRY clone.
+  - Updated `PresenterAppController` in `apps/presenter/src/index.ts`:
+    - Added `handleRealtimeEvent` handling `question.submitted`, `question.updated`, and `question.upvoted`.
+    - Enhanced `getQuestions(sortBy)` with vote tie-breaker.
+  - Updated `apps/worker/src/index.ts`:
+    - Hydrates `question_upvotes` into `upvotedByParticipantIds` on DO cold start.
+    - `POST /api/v1/sessions/:id/questions/:questionId/upvote` enforces participant token, DO session hydration, slide revelation 403 check, DO SQLite insertion/deletion into `question_upvotes`, `questions.upvotes` update, and `question.upvoted` WebSocket broadcasting.
+    - `GET /api/v1/sessions/:id/questions` supports `sortBy` (`votes` | `time` | `created`) and `order` (`asc` | `desc`).
+  - Updated OpenAPI 3.1.0 specifications (`apps/worker/src/openapi.ts` and `docs/openapi.json`) for `sortBy`, `order`, and `upvotedByParticipantIds`.
+  - Added and expanded unit, component, and integration test coverage:
+    - `packages/domain/src/__tests__/domain.test.ts` (30 tests)
+    - `apps/audience/src/__tests__/audience.test.ts` (31 tests)
+    - `apps/presenter/src/__tests__/presenter.test.ts` (19 tests)
+    - `tests/integration/cloudflare-emulation.test.ts` (6 tests)
+    - `tests/integration/worker-api.test.ts` (10 tests)
+  - Closed GitHub issue #13 (`SPEC-007: Question upvoting`).
+- **Verification Evidence**:
+  - `pnpm test`, `./init.sh`, and `pnpm run verify`: 13/13 test suites (162 tests) passing, 0 ESLint warnings, 0 typecheck errors, 1.5% code duplication (`<= 10%`).
+  - `pnpm run harness:victory`: 🏆 Victory Detected (Layer 1, Layer 2, Layer 3 passing).
+
+
 
 

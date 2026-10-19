@@ -702,13 +702,22 @@ export function toggleQuestionUpvote(
 }
 
 /**
- * Sorts audience questions by votes (tie-breaker createdAt) or by time (SPEC-007, SPEC-008).
+ * Checks whether a participant has upvoted a given question (SPEC-007).
+ */
+export function isQuestionUpvotedBy(question: AudienceQuestion, participantId: string): boolean {
+  if (!participantId || !question.upvotedByParticipantIds) return false;
+  return question.upvotedByParticipantIds.includes(participantId);
+}
+
+/**
+ * Sorts audience questions dynamically by votes (tie-breaker createdAt) or by time (SPEC-007, SPEC-008).
  */
 export function sortQuestions(
   questions: AudienceQuestion[],
-  sortBy: 'votes' | 'time',
+  sortBy: 'votes' | 'time' | 'created' = 'votes',
+  order: 'asc' | 'desc' = 'desc',
 ): AudienceQuestion[] {
-  return [...questions].sort((a, b) => {
+  const sorted = [...questions].sort((a, b) => {
     if (sortBy === 'votes') {
       if (b.upvotes !== a.upvotes) {
         return b.upvotes - a.upvotes;
@@ -717,6 +726,10 @@ export function sortQuestions(
     }
     return b.createdAt.localeCompare(a.createdAt);
   });
+  if (order === 'asc') {
+    return sorted.reverse();
+  }
+  return sorted;
 }
 
 /**

@@ -23,6 +23,7 @@ import {
   editPresentationSlide,
   evaluateAdaptiveNavigationRules,
   getSoloNavigableSlides,
+  isQuestionUpvotedBy,
   isSlideRevealed,
   navigatePresenterSlide,
   navigateSoloMode,
@@ -569,25 +570,45 @@ describe('Domain Logic — SPEC-001 through SPEC-024', () => {
       const upvoted = toggleQuestionUpvote(question, 'part-2');
       expect(upvoted.upvotes).toBe(1);
       expect(upvoted.upvotedByParticipantIds).toEqual(['part-2']);
+      expect(isQuestionUpvotedBy(upvoted, 'part-2')).toBe(true);
+      expect(isQuestionUpvotedBy(upvoted, 'part-3')).toBe(false);
 
-      // Retract
-      const retracted = toggleQuestionUpvote(upvoted, 'part-2');
-      expect(retracted.upvotes).toBe(0);
-      expect(retracted.upvotedByParticipantIds).toEqual([]);
+      // Multiple distinct participants upvote
+      const upvoted2 = toggleQuestionUpvote(upvoted, 'part-3');
+      expect(upvoted2.upvotes).toBe(2);
+      expect(upvoted2.upvotedByParticipantIds).toEqual(['part-2', 'part-3']);
+      expect(isQuestionUpvotedBy(upvoted2, 'part-3')).toBe(true);
+
+      // Retract first upvote
+      const retracted = toggleQuestionUpvote(upvoted2, 'part-2');
+      expect(retracted.upvotes).toBe(1);
+      expect(retracted.upvotedByParticipantIds).toEqual(['part-3']);
+      expect(isQuestionUpvotedBy(retracted, 'part-2')).toBe(false);
+
+      // Throws on empty participant ID
+      expect(() => toggleQuestionUpvote(question, '')).toThrow(
+        'Participant ID is required to vote',
+      );
     });
 
-    it('sorts questions by votes or time', () => {
+    it('sorts questions dynamically by votes or time with ordering and tie-breakers', () => {
       const qList: AudienceQuestion[] = [
         { ...question, id: 'q-1', upvotes: 2, createdAt: '2026-10-18T10:01:00.000Z' },
         { ...question, id: 'q-2', upvotes: 10, createdAt: '2026-10-18T10:00:00.000Z' },
         { ...question, id: 'q-3', upvotes: 2, createdAt: '2026-10-18T10:05:00.000Z' },
       ];
 
-      const byVotes = sortQuestions(qList, 'votes');
-      expect(byVotes.map((q) => q.id)).toEqual(['q-2', 'q-3', 'q-1']); // q-3 tie breaks over q-1 due to later createdAt
+      const byVotesDesc = sortQuestions(qList, 'votes', 'desc');
+      expect(byVotesDesc.map((q) => q.id)).toEqual(['q-2', 'q-3', 'q-1']); // q-3 tie breaks over q-1 due to later createdAt
 
-      const byTime = sortQuestions(qList, 'time');
-      expect(byTime.map((q) => q.id)).toEqual(['q-3', 'q-1', 'q-2']);
+      const byVotesAsc = sortQuestions(qList, 'votes', 'asc');
+      expect(byVotesAsc.map((q) => q.id)).toEqual(['q-1', 'q-3', 'q-2']);
+
+      const byTimeDesc = sortQuestions(qList, 'time', 'desc');
+      expect(byTimeDesc.map((q) => q.id)).toEqual(['q-3', 'q-1', 'q-2']);
+
+      const byTimeAsc = sortQuestions(qList, 'time', 'asc');
+      expect(byTimeAsc.map((q) => q.id)).toEqual(['q-2', 'q-1', 'q-3']);
     });
   });
 

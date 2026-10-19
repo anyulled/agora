@@ -328,6 +328,36 @@ describe('PresenterAppController (SPEC-008, SPEC-011, SPEC-012, SPEC-023)', () =
       expect(updated.status).toBe('dismissed');
       expect(presenter.getQuestions().find((q) => q.id === 'q1')?.status).toBe('dismissed');
     });
+
+    it('processes question.upvoted real-time WebSocket events and updates tallies (SPEC-007)', () => {
+      expect(presenter.getQuestions().find((q) => q.id === 'q1')?.upvotes).toBe(8);
+
+      presenter.handleRealtimeEvent({
+        id: 'evt-q1-upvote',
+        type: 'question.upvoted',
+        sessionId: 'sess_1',
+        timestamp: new Date().toISOString(),
+        payload: {
+          questionId: 'q1',
+          voteCount: 15,
+          upvotes: 15,
+          participantId: 'p_bob',
+          hasUpvoted: true,
+        },
+      });
+
+      const q1 = presenter.getQuestions().find((q) => q.id === 'q1');
+      expect(q1?.upvotes).toBe(15);
+      expect(q1?.upvotedByParticipantIds).toContain('p_bob');
+    });
+
+    it('supports dynamic sorting by vote count and creation timestamp (SPEC-007)', () => {
+      const byVotes = presenter.getQuestions('votes');
+      expect(byVotes[0]?.id).toBe('q1'); // q1 has 8 votes vs q2 with 3 votes
+
+      const byTime = presenter.getQuestions('time');
+      expect(byTime[0]?.id).toBe('q2'); // q2 created at 20:05 vs q1 created at 20:00
+    });
   });
 
   describe('Ending Slide & Explicit Session Completion (SPEC-016, SPEC-022)', () => {

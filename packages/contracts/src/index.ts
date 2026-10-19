@@ -106,6 +106,21 @@ export interface AudienceQuestion {
   createdAt: string;
 }
 
+export interface QuestionUpvote {
+  questionId: string;
+  participantId: string;
+  createdAt: string;
+}
+
+export interface QuestionUpvotedPayload {
+  questionId: string;
+  voteCount: number;
+  upvotes: number;
+  participantId: string;
+  hasUpvoted: boolean;
+  userUpvoted: boolean;
+}
+
 export interface PollOption {
   id: string;
   label: string;

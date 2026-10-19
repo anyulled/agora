@@ -653,6 +653,7 @@ describe('Cloudflare Local Emulation Integration Tests', () => {
       content: string;
       status: string;
       upvotes: number;
+      upvotedByParticipantIds?: string[];
       participantName: string;
     }>;
     expect(loadedList).toHaveLength(1);
@@ -662,6 +663,7 @@ describe('Cloudflare Local Emulation Integration Tests', () => {
     expect(loadedList[0]?.participantName).toBe('Charlie Brown');
     expect(loadedList[0]?.status).toBe('answered');
     expect(loadedList[0]?.upvotes).toBe(1);
+    expect(loadedList[0]?.upvotedByParticipantIds).toContain(participant.id);
 
     env.close();
   });
