@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/agora-banner.jpg" alt="Agora - Interactive Real-Time Conference Presentation Platform" width="100%" />
+</p>
+
 # 🏛️ Ἀγορά · ΑΓΟΡΑ (Ágora)
 
 > **Interactive Real-Time Conference Presentation Platform**  
