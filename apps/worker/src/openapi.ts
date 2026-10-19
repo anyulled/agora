@@ -469,7 +469,10 @@ export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
           properties: {
             slideId: { type: 'string' },
             question: { type: 'string' },
-            type: { type: 'string', enum: ['single', 'multiple', 'binary'] },
+            type: {
+              type: 'string',
+              enum: ['single', 'single-choice', 'multiple', 'multiple-choice', 'binary'],
+            },
             options: {
               type: 'array',
               items: {
@@ -497,8 +500,11 @@ export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
         security: participantSec,
         requestBody: jsonBody({
           type: 'object',
-          required: ['optionId'],
-          properties: { optionId: { type: 'string' } },
+          properties: {
+            selectedOptionIds: { type: 'array', minItems: 1, items: { type: 'string' } },
+            selectedOptionId: { type: 'string', deprecated: true },
+            optionId: { type: 'string', deprecated: true },
+          },
         }),
         responses: {
           '200': jsonRes('Poll results summary and navigation suggestions', {

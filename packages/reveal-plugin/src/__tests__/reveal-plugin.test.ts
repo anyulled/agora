@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  PollSlideController,
   QaSlideController,
   RevealAudience,
   RevealAudiencePlugin,
@@ -36,6 +37,18 @@ class MockElement {
 
   public appendChild(child: MockElement): MockElement {
     this.children.push(child);
+    return child;
+  }
+
+  public get firstChild(): MockElement | null {
+    return this.children[0] ?? null;
+  }
+
+  public removeChild(child: MockElement): MockElement {
+    const idx = this.children.indexOf(child);
+    if (idx >= 0) {
+      this.children.splice(idx, 1);
+    }
     return child;
   }
 
@@ -866,5 +879,141 @@ describe('QaSlideController and Q&A transitions', () => {
     expect(mockDeck.slide).not.toHaveBeenCalled();
 
     plugin.destroy();
+  });
+
+  describe('PollSlideController and contextual polls (SPEC-010)', () => {
+    it('mounts on slide container and renders poll questions and options', () => {
+      const container = document.createElement('div');
+      container.setAttribute('data-slide-id', 'slide-poll-1');
+
+      const controller = new PollSlideController('session-1', 'https://api.agora.test');
+      controller.mount(container, 'slide-poll-1');
+
+      controller.setPoll({
+        id: 'poll-1',
+        sessionId: 'session-1',
+        slideId: 'slide-poll-1',
+        question: 'Which deployment model fits your workload?',
+        type: 'single-choice',
+        options: [
+          { id: 'opt-edge', label: 'Cloudflare Workers Edge', text: 'Cloudflare Workers Edge' },
+          { id: 'opt-containers', label: 'Regional Containers', text: 'Regional Containers' },
+        ],
+        status: 'open',
+        resultsRevealed: false,
+      });
+
+      expect(controller.getPollForSlide('slide-poll-1')?.id).toBe('poll-1');
+      expect(container.querySelector('.poll-question-title')?.textContent).toBe(
+        'Which deployment model fits your workload?',
+      );
+      expect(container.querySelector('.poll-status-tag')?.textContent).toBe('OPEN');
+      expect(container.querySelector('.poll-type-tag')?.textContent).toBe('Single Choice');
+      expect(container.querySelectorAll('.poll-projector-option-card').length).toBe(2);
+    });
+
+    it('updates results and renders progress bars upon real-time poll events', () => {
+      const container = document.createElement('div');
+      const controller = new PollSlideController('session-1', 'https://api.agora.test');
+      controller.mount(container, 'slide-poll-2');
+
+      // Realtime poll.opened event
+      controller.handleRealtimeEvent('poll.opened', {
+        id: 'poll-2',
+        sessionId: 'session-1',
+        slideId: 'slide-poll-2',
+        question: 'Is serverless first viable for latency-critical apps?',
+        type: 'binary',
+        options: [
+          { id: 'opt-yes', text: 'Yes' },
+          { id: 'opt-no', text: 'No' },
+        ],
+        status: 'open',
+      });
+
+      expect(container.querySelector('.poll-type-tag')?.textContent).toBe('Binary (Yes/No)');
+
+      // Realtime poll.voted event
+      controller.handleRealtimeEvent('poll.voted', {
+        pollId: 'poll-2',
+        selectedOptionIds: ['opt-yes'],
+        totalResponses: 1,
+      });
+
+      // Realtime poll.results event (revealing results to projector)
+      controller.handleRealtimeEvent('poll.results', {
+        pollId: 'poll-2',
+        results: { 'opt-yes': 3, 'opt-no': 1 },
+        totalVotes: 4,
+        resultsRevealed: true,
+      });
+
+      const summary = controller.getPollResults('poll-2');
+      expect(summary?.totalResponses).toBe(4);
+      expect(summary?.countsByOptionId['opt-yes']).toBe(3);
+
+      const statsElements = container.querySelectorAll('.poll-option-counts');
+      expect(statsElements.length).toBe(2);
+      expect(statsElements[0]?.textContent).toBe('3 votes (75%)');
+      expect(statsElements[1]?.textContent).toBe('1 votes (25%)');
+
+      const barFills = container.querySelectorAll('.poll-bar-fill');
+      expect(barFills.length).toBe(2);
+      expect((barFills[0] as HTMLElement).style.width).toBe('75%');
+      expect((barFills[1] as HTMLElement).style.width).toBe('25%');
+
+      // Realtime poll.closed event
+      controller.handleRealtimeEvent('poll.closed', { pollId: 'poll-2' });
+      expect(container.querySelector('.poll-status-tag')?.textContent).toBe('CLOSED');
+    });
+
+    it('mounts PollSlideController automatically on RevealAudiencePlugin slide change', async () => {
+      const fetchMock = vi.fn().mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({}),
+      }));
+
+      const mockDeck: RevealDeck = {
+        getConfig: () => ({
+          audience: {
+            sessionId: 'session-poll-deck',
+            endpoint: 'https://api.agora.test',
+            presenterToken: 'pres-token-poll',
+          },
+        }),
+        on: vi.fn(),
+        slide: vi.fn(),
+      };
+
+      const plugin = new RevealAudiencePlugin({
+        sessionId: 'session-poll-deck',
+        endpoint: 'https://api.agora.test',
+        presenterToken: 'pres-token-poll',
+        fetchFn: fetchMock as unknown as typeof fetch,
+      });
+
+      await plugin.init(mockDeck);
+
+      const pollSlideSection = document.createElement('section');
+      pollSlideSection.setAttribute('data-slide-id', 'slide-poll-deck');
+      pollSlideSection.setAttribute('data-component', 'audience-poll');
+
+      const slideChangedListener = (mockDeck.on as ReturnType<typeof vi.fn>).mock.calls.find(
+        (call) => call[0] === 'slidechanged',
+      )?.[1] as (e: RevealSlideChangedEvent) => void;
+
+      expect(slideChangedListener).toBeDefined();
+
+      slideChangedListener({
+        currentSlide: pollSlideSection as unknown as Element,
+        indexh: 2,
+        indexv: 0,
+      });
+
+      const pollCtrl = plugin.getPollController();
+      expect(pollCtrl).not.toBeNull();
+
+      plugin.destroy();
+    });
   });
 });

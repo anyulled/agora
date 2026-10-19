@@ -205,7 +205,7 @@ export async function provisionInfrastructure(options = {}) {
       '    [ACTION REQUIRED] No workers.dev subdomain is registered on this Cloudflare account.',
     );
     console.log(
-      '    --> Register your free subdomain in Cloudflare Dashboard: https://dash.cloudflare.com/?to=/:account/workers/onboarding',
+      '    --> Register your free subdomain in Cloudflare Dashboard: https://dash.cloudflare.com/?to=/:account/workers-and-pages',
     );
     console.log(
       '    --> Or add CLOUDFLARE_WORKERS_SUBDOMAIN to GitHub Secrets to register it via CI.',

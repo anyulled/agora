@@ -1,9 +1,9 @@
-import type {
-  AudienceQuestion,
-  PollDefinition,
-  PollOption,
-  PollResultsSummary,
-  WebSocketLike,
+import {
+  processPollRealtimeEvent,
+  type AudienceQuestion,
+  type PollDefinition,
+  type PollResultsSummary,
+  type WebSocketLike,
 } from '@agora/contracts';
 
 export type { WebSocketLike };
@@ -812,6 +812,33 @@ export class PollSlideController {
     }
     injectPollStylesOnce();
     this.render();
+    void this.loadPolls();
+  }
+
+  public async loadPolls(): Promise<PollDefinition[]> {
+    const fetchImplementation =
+      this.options?.fetchFn ?? (typeof fetch !== 'undefined' ? fetch : null);
+    if (!fetchImplementation) return this.polls;
+    try {
+      let base = this.endpoint;
+      while (base.endsWith('/')) base = base.slice(0, -1);
+      const response = await fetchImplementation(
+        `${base}/api/v1/sessions/${encodeURIComponent(this.sessionId)}/polls`,
+        this.options?.presenterToken
+          ? { headers: { Authorization: `Bearer ${this.options.presenterToken}` } }
+          : undefined,
+      );
+      if (response.ok) {
+        const polls = (await response.json()) as PollDefinition[];
+        if (Array.isArray(polls)) {
+          this.polls = polls;
+          this.render();
+        }
+      }
+    } catch {
+      // Keep the last known poll state when offline.
+    }
+    return this.polls;
   }
 
   public handleRealtimeEvent(type: string, payload: unknown): void {
@@ -848,62 +875,13 @@ export class PollSlideController {
           this.render();
         }
       }
-    } else if (type === 'poll.voted') {
-      const p = payload as {
-        pollId?: string;
-        selectedOptionIds?: string[];
-        totalResponses?: number;
-      };
-      if (p?.pollId) {
-        let summary = this.pollResults.get(p.pollId);
-        if (!summary) {
-          const poll = this.polls.find((item) => item.id === p.pollId);
-          summary = {
-            pollId: p.pollId,
-            slideId: poll?.slideId ?? '',
-            status: poll?.status ?? 'open',
-            resultsRevealed: poll?.resultsRevealed ?? false,
-            totalResponses: p.totalResponses ?? 0,
-            countsByOptionId: poll
-              ? Object.fromEntries(poll.options.map((o: PollOption) => [o.id, 0]))
-              : {},
-          };
-          this.pollResults.set(p.pollId, summary);
-        }
-        if (p.totalResponses !== undefined) {
-          summary.totalResponses = p.totalResponses;
-        }
-        if (p.selectedOptionIds) {
-          for (const optId of p.selectedOptionIds) {
-            summary.countsByOptionId[optId] = (summary.countsByOptionId[optId] ?? 0) + 1;
-          }
-        }
-        this.render();
-      }
-    } else if (type === 'poll.results') {
-      const p = payload as {
-        pollId?: string;
-        results?: Record<string, number>;
-        totalVotes?: number;
-        resultsRevealed?: boolean;
-        summary?: PollResultsSummary;
-      };
-      const summary =
-        p.summary ??
-        (p.pollId
-          ? {
-              pollId: p.pollId,
-              slideId: this.polls.find((item) => item.id === p.pollId)?.slideId ?? '',
-              status: this.polls.find((item) => item.id === p.pollId)?.status ?? 'closed',
-              resultsRevealed: true,
-              totalResponses: p.totalVotes ?? 0,
-              countsByOptionId: p.results ?? {},
-            }
-          : null);
-      if (summary) {
-        this.pollResults.set(summary.pollId, summary);
-        const poll = this.polls.find((item) => item.id === summary.pollId);
-        if (poll) {
+    } else if (type === 'poll.voted' || type === 'poll.results') {
+      const summary = this.pollResults.get((payload as { pollId?: string })?.pollId || '');
+      const poll = this.polls.find((item) => item.id === (payload as { pollId?: string })?.pollId);
+      const res = processPollRealtimeEvent(type, payload, poll, summary);
+      if (res) {
+        this.pollResults.set(res.pollId, res);
+        if (type === 'poll.results' && poll) {
           poll.resultsRevealed = true;
         }
         this.render();
@@ -1202,6 +1180,7 @@ export class RevealAudiencePlugin implements RevealPlugin {
           clearTimeout(this.wsRetryTimeoutId);
           this.wsRetryTimeoutId = null;
         }
+        void this.pollController?.loadPolls();
         if (this.pendingSlideUpdate && this.config?.presenterToken) {
           this.sendWebSocketSlideChange(
             this.pendingSlideUpdate.slideId,
@@ -1388,6 +1367,7 @@ export class RevealAudiencePlugin implements RevealPlugin {
 
   private handleSlideChange(event: RevealSlideChangedEvent): void {
     const { currentSlide, indexh, indexv } = event;
+    const currentSlideElement = currentSlide as HTMLElement;
     const metadata = extractSlideMetadata(currentSlide, indexh, indexv);
     this.currentMetadata = metadata;
 
@@ -1408,17 +1388,21 @@ export class RevealAudiencePlugin implements RevealPlugin {
     }
 
     const isPoll =
-      currentSlide?.getAttribute?.('data-component') === 'audience-poll' ||
+      currentSlideElement?.dataset?.component === 'audience-poll' ||
       Boolean(currentSlide?.querySelector?.('[data-component="audience-poll"]')) ||
-      Boolean(currentSlide?.getAttribute?.('data-poll-id')) ||
+      Boolean(currentSlideElement?.dataset?.pollId) ||
       Boolean(this.pollController?.getPollForSlide(metadata.id));
 
     if (isPoll && this.pollController) {
-      const target =
-        currentSlide.getAttribute('data-component') === 'audience-poll'
-          ? (currentSlide as HTMLElement)
-          : (currentSlide.querySelector('[data-component="audience-poll"]') as HTMLElement) ||
-            (currentSlide as HTMLElement);
+      let target: HTMLElement | null =
+        currentSlideElement.dataset.component === 'audience-poll'
+          ? currentSlideElement
+          : (currentSlide.querySelector('[data-component="audience-poll"]') as HTMLElement | null);
+      if (!target && typeof document !== 'undefined') {
+        target = document.createElement('div');
+        target.dataset.component = 'audience-poll';
+        currentSlideElement.appendChild(target);
+      }
       if (target) {
         this.pollController.mount(target, metadata.id);
       }

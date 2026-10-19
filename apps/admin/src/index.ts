@@ -1,10 +1,12 @@
-import type {
-  AssetManifest,
-  AssetManifestEntry,
-  Presentation,
-  PresentationBranding,
-  PresentationSession,
-  SlideMetadata,
+import {
+  escapeHtml,
+  safeUrlAttribute,
+  type AssetManifest,
+  type AssetManifestEntry,
+  type Presentation,
+  type PresentationBranding,
+  type PresentationSession,
+  type SlideMetadata,
 } from '@agora/contracts';
 
 export interface CreateSlideInput {
@@ -615,15 +617,15 @@ export function renderAdminDashboardHtml(state: AdminDashboardViewModel): string
 
       const sessionJoinHtml = activeSession
         ? `<div class="session-join-info" data-session-id="${activeSession.id}">
-            <p class="session-join-link">Join URL: <a href="${activeSession.audienceUrl ?? ''}" class="session-join-url">${activeSession.audienceUrl ?? ''}</a></p>
-            ${activeSession.qrCodeDataUrl ? `<img src="${activeSession.qrCodeDataUrl}" alt="Join QR code for ${p.title}" class="session-qr-code" />` : ''}
+            <p class="session-join-link">Join URL: <a href="${safeUrlAttribute(activeSession.audienceUrl ?? null)}" class="session-join-url">${escapeHtml(activeSession.audienceUrl ?? '')}</a></p>
+            ${activeSession.qrCodeDataUrl ? `<img src="${safeUrlAttribute(activeSession.qrCodeDataUrl, true)}" alt="Join QR code for ${escapeHtml(p.title)}" class="session-qr-code" />` : ''}
           </div>`
         : '';
 
       return `
-      <article class="card presentation-card" data-presentation-id="${p.id}">
+      <article class="card presentation-card" data-presentation-id="${escapeHtml(p.id)}">
         <div class="card-header">
-          <h3>${p.title}</h3>
+          <h3>${escapeHtml(p.title)}</h3>
           ${sessionBadge}
         </div>
         <p class="revision-label">Revision: <strong>${p.revision}</strong> | Slides: ${p.slides?.length ?? 0}</p>
@@ -714,17 +716,17 @@ export function renderAssetPreviewHtml(preview: AssetPreviewModel): string {
       (s) => `
       <div class="asset-preview-item ${s.hasPng ? 'status-ready' : 'status-missing'}">
         <div class="preview-header">
-          <strong>${s.slide.title}</strong>
+          <strong>${escapeHtml(s.slide.title)}</strong>
           <span class="badge">${s.hasPng ? 'PNG Ready' : 'PNG Missing'}</span>
         </div>
-        ${s.hasPng ? `<img src="/assets/${s.pngEntry?.r2Key ?? ''}" alt="${s.slide.title}" class="slide-thumbnail" />` : '<div class="thumbnail-placeholder">No Image</div>'}
+        ${s.hasPng ? `<img src="${safeUrlAttribute(`/assets/${s.pngEntry?.r2Key ?? ''}`)}" alt="${escapeHtml(s.slide.title)}" class="slide-thumbnail" />` : '<div class="thumbnail-placeholder">No Image</div>'}
       </div>`,
     )
     .join('');
 
   return `
     <div class="asset-preview-view">
-      <h3>Asset Preview for "${preview.title}" (${preview.revision})</h3>
+      <h3>Asset Preview for "${escapeHtml(preview.title)}" (${escapeHtml(preview.revision)})</h3>
       <div class="pdf-status-banner ${preview.isPdfStale ? 'banner-stale' : 'banner-ready'}">
         <strong>Deck PDF:</strong> ${preview.isPdfStale ? 'Stale or not uploaded' : 'Up to date with current revision'}
       </div>

@@ -11,7 +11,26 @@ import type {
 } from '@agora/contracts';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AudienceAppController } from '../../apps/audience/src/index';
-import { createAgoraWorkerApp } from '../../apps/worker/src/index';
+import worker, { createAgoraWorkerApp } from '../../apps/worker/src/index';
+
+it('retains configured Worker state across requests', async () => {
+  const token = `local-test-${crypto.randomUUID()}`;
+  const env = { ADMIN_TOKEN: token };
+  const create = await worker.fetch(
+    new Request('http://localhost/api/v1/presentations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': token },
+      body: JSON.stringify({ title: 'Local presentation' }),
+    }),
+    env,
+  );
+  expect(create.status).toBe(201);
+  const presentation = (await create.json()) as Presentation;
+
+  const list = await worker.fetch(new Request('http://localhost/api/v1/presentations'), env);
+  expect(list.status).toBe(200);
+  expect((await list.json()) as Presentation[]).toEqual([presentation]);
+});
 
 describe('Worker HTTP API Integration Tests', () => {
   const adminSecret = 'test-admin-secret-token';
@@ -1849,5 +1868,388 @@ describe('Worker HTTP API Integration Tests', () => {
 
     // Destroy coordinator
     coordinator.destroy();
+  });
+
+  it('implements SPEC-010: single/multi/binary poll formats, presenter lifecycle, participant voting invariants, and DO persistence', async () => {
+    // 1. Setup presentation and session
+    const presRes = await app.fetch(
+      new Request('https://api.agora.test/api/v1/presentations', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'Interactive Polls Keynote',
+          endingSlideId: 'slide-poll-2',
+          slides: [
+            {
+              id: 'slide-poll-1',
+              presentationId: 'p-poll',
+              title: 'Slide 1 - Architecture Poll',
+              horizontalIndex: 0,
+              verticalIndex: 0,
+              order: 0,
+            },
+            {
+              id: 'slide-poll-2',
+              presentationId: 'p-poll',
+              title: 'Slide 2 - Feedback Poll',
+              horizontalIndex: 1,
+              verticalIndex: 0,
+              order: 1,
+            },
+          ],
+        }),
+      }),
+    );
+    const pres = (await presRes.json()) as Presentation;
+
+    const sRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/presentations/${pres.id}/sessions`, {
+        method: 'POST',
+        headers: adminHeaders,
+      }),
+    );
+    const session = (await sRes.json()) as PresentationSession & { presenterToken: string };
+    const presenterHeaders = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.presenterToken}`,
+    };
+
+    // Join attendees Alice and Bob
+    const joinAlice = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Alice' }),
+      }),
+    );
+    const alice = (await joinAlice.json()) as ParticipantIdentity;
+
+    const joinBob = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Bob' }),
+      }),
+    );
+    const bob = (await joinBob.json()) as ParticipantIdentity;
+
+    // 2. Presenter creates a single-choice poll on slide-poll-1
+    const createSingleRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/polls`, {
+        method: 'POST',
+        headers: presenterHeaders,
+        body: JSON.stringify({
+          slideId: 'slide-poll-1',
+          question: 'What is your primary state storage?',
+          type: 'single-choice',
+          options: [
+            { id: 'opt-d1', text: 'Cloudflare D1 SQLite' },
+            { id: 'opt-do', text: 'Durable Objects Embedded SQLite' },
+            { id: 'opt-kv', text: 'Workers KV' },
+          ],
+        }),
+      }),
+    );
+    expect(createSingleRes.status).toBe(201);
+    const singlePoll = (await createSingleRes.json()) as PollDefinition;
+    expect(singlePoll.status).toBe('open');
+
+    // 3. Presenter creates a binary poll on slide-poll-1
+    const createBinaryRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/polls`, {
+        method: 'POST',
+        headers: presenterHeaders,
+        body: JSON.stringify({
+          slideId: 'slide-poll-1',
+          question: 'Do you run unit tests in CI on every push?',
+          type: 'binary',
+          options: [
+            { id: 'bin-yes', text: 'Yes' },
+            { id: 'bin-no', text: 'No' },
+          ],
+        }),
+      }),
+    );
+    expect(createBinaryRes.status).toBe(201);
+    await createBinaryRes.json();
+
+    // 4. Presenter creates a multiple-choice poll on slide-poll-2 (currently unrevealed slide)
+    const createMultiRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/polls`, {
+        method: 'POST',
+        headers: presenterHeaders,
+        body: JSON.stringify({
+          slideId: 'slide-poll-2',
+          question: 'Which features do you want next?',
+          type: 'multiple-choice',
+          options: [
+            { id: 'm-export', text: 'Slide PNG Export' },
+            { id: 'm-charts', text: 'Interactive Charts' },
+            { id: 'm-a11y', text: 'A11y Enhancements' },
+          ],
+        }),
+      }),
+    );
+    expect(createMultiRes.status).toBe(201);
+    const multiPoll = (await createMultiRes.json()) as PollDefinition;
+
+    // 5. Voting on an unrevealed slide (slide-poll-2) is rejected with 403
+    const unrevealedVoteRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/polls/${multiPoll.id}/vote`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${alice.token}`,
+          },
+          body: JSON.stringify({ selectedOptionIds: ['m-export', 'm-charts'] }),
+        },
+      ),
+    );
+    expect(unrevealedVoteRes.status).toBe(403);
+
+    // 6. Voting invariant: single-choice rejects multiple options with 400
+    const invalidMultiSelectRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/polls/${singlePoll.id}/vote`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${alice.token}`,
+          },
+          body: JSON.stringify({ selectedOptionIds: ['opt-d1', 'opt-do'] }),
+        },
+      ),
+    );
+    expect(invalidMultiSelectRes.status).toBe(400);
+
+    // Voting invariant: invalid option ID rejected with 400
+    const invalidOptRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/polls/${singlePoll.id}/vote`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${alice.token}`,
+          },
+          body: JSON.stringify({ optionId: 'invalid-non-existent-option' }),
+        },
+      ),
+    );
+    expect(invalidOptRes.status).toBe(400);
+
+    // 7. Alice votes on single-choice poll -> 200 OK
+    const aliceVoteRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/polls/${singlePoll.id}/vote`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${alice.token}`,
+          },
+          body: JSON.stringify({ optionId: 'opt-do' }),
+        },
+      ),
+    );
+    expect(aliceVoteRes.status).toBe(200);
+
+    // Voting invariant: Alice voting again in singlePoll rejected with 409 (duplicate vote)
+    const duplicateVoteRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/polls/${singlePoll.id}/vote`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${alice.token}`,
+          },
+          body: JSON.stringify({ optionId: 'opt-d1' }),
+        },
+      ),
+    );
+    expect(duplicateVoteRes.status).toBe(409);
+
+    // Bob votes on single-choice poll -> 200 OK
+    const bobVoteRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/polls/${singlePoll.id}/vote`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${bob.token}`,
+          },
+          body: JSON.stringify({ optionId: 'opt-do' }),
+        },
+      ),
+    );
+    expect(bobVoteRes.status).toBe(200);
+
+    const audienceStateRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}`),
+    );
+    const audienceState = (await audienceStateRes.json()) as {
+      activePolls: Array<{
+        pollId: string;
+        totalResponses: number;
+        countsByOptionId: Record<string, number>;
+      }>;
+    };
+    const audiencePoll = audienceState.activePolls.find((poll) => poll.pollId === singlePoll.id);
+    expect(audiencePoll?.totalResponses).toBe(0);
+    expect(audiencePoll?.countsByOptionId['opt-do']).toBe(0);
+
+    const presenterStateRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}`, {
+        headers: presenterHeaders,
+      }),
+    );
+    const presenterState = (await presenterStateRes.json()) as {
+      activePolls: Array<{
+        pollId: string;
+        totalResponses: number;
+        countsByOptionId: Record<string, number>;
+      }>;
+    };
+    const presenterPoll = presenterState.activePolls.find((poll) => poll.pollId === singlePoll.id);
+    expect(presenterPoll?.totalResponses).toBe(2);
+    expect(presenterPoll?.countsByOptionId['opt-do']).toBe(2);
+
+    // 8. Presenter closes poll -> voting while closed rejected with 400
+    const closeRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/polls/${singlePoll.id}/close`,
+        {
+          method: 'POST',
+          headers: presenterHeaders,
+        },
+      ),
+    );
+    expect(closeRes.status).toBe(200);
+    const closedData = (await closeRes.json()) as PollDefinition;
+    expect(closedData.status).toBe('closed');
+
+    // Voting when closed -> 400
+    const voteClosedRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/polls/${singlePoll.id}/vote`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${alice.token}`,
+          },
+          body: JSON.stringify({ optionId: 'opt-kv' }),
+        },
+      ),
+    );
+    expect(voteClosedRes.status).toBe(400);
+
+    // Presenter can re-open poll on demand
+    const reopenRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/polls/${singlePoll.id}/open`,
+        {
+          method: 'POST',
+          headers: presenterHeaders,
+        },
+      ),
+    );
+    expect(reopenRes.status).toBe(200);
+
+    // 9. Presenter reveals poll results to projector/audience
+    const revealRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/polls/${singlePoll.id}/reveal`,
+        {
+          method: 'POST',
+          headers: presenterHeaders,
+        },
+      ),
+    );
+    expect(revealRes.status).toBe(200);
+    const revealSummary = (await revealRes.json()) as {
+      pollId: string;
+      totalResponses: number;
+      countsByOptionId: Record<string, number>;
+      percentagesByOptionId: Record<string, number>;
+    };
+    expect(revealSummary.pollId).toBe(singlePoll.id);
+    expect(revealSummary.totalResponses).toBe(2);
+    expect(revealSummary.countsByOptionId['opt-do']).toBe(2);
+
+    // 10. Reveal slide 2 and vote on multiple-choice poll
+    const revealSlide2Res = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/slide`, {
+        method: 'POST',
+        headers: presenterHeaders,
+        body: JSON.stringify({ slideId: 'slide-poll-2', indexh: 1, indexv: 0 }),
+      }),
+    );
+    expect(revealSlide2Res.status).toBe(200);
+
+    const repeatedChoiceRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/polls/${multiPoll.id}/vote`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${alice.token}`,
+          },
+          body: JSON.stringify({ selectedOptionIds: ['m-export', 'm-export'] }),
+        },
+      ),
+    );
+    expect(repeatedChoiceRes.status).toBe(400);
+
+    // Multiple-choice poll allows selecting 2 options
+    const multiVoteRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/polls/${multiPoll.id}/vote`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${alice.token}`,
+          },
+          body: JSON.stringify({ selectedOptionIds: ['m-export', 'm-a11y'] }),
+        },
+      ),
+    );
+    expect(multiVoteRes.status).toBe(200);
+
+    // Presenter reveals multiple-choice poll results
+    const revealMultiRes = await app.fetch(
+      new Request(
+        `https://api.agora.test/api/v1/sessions/${session.id}/polls/${multiPoll.id}/reveal`,
+        {
+          method: 'POST',
+          headers: presenterHeaders,
+        },
+      ),
+    );
+    expect(revealMultiRes.status).toBe(200);
+    const multiSummary = (await revealMultiRes.json()) as {
+      totalResponses: number;
+      countsByOptionId: Record<string, number>;
+    };
+    expect(multiSummary.totalResponses).toBe(1);
+    expect(multiSummary.countsByOptionId['m-export']).toBe(1);
+    expect(multiSummary.countsByOptionId['m-a11y']).toBe(1);
+
+    // 11. Verify GET /api/v1/sessions/:id/polls lists all session polls
+    const listPollsRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/polls`, {
+        headers: presenterHeaders,
+      }),
+    );
+    expect(listPollsRes.status).toBe(200);
+    const listedPolls = (await listPollsRes.json()) as PollDefinition[];
+    expect(listedPolls.length).toBe(3);
   });
 });

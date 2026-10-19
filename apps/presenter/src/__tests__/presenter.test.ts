@@ -502,6 +502,33 @@ describe('PresenterAppController (SPEC-008, SPEC-011, SPEC-012, SPEC-023)', () =
   });
 
   describe('SPEC-010: Contextual polls and presenter/projector synchronization', () => {
+    it('loads authoritative poll summaries before revealing results', async () => {
+      const summary = {
+        pollId: 'poll-arch',
+        slideId: 'slide_0',
+        status: 'closed' as const,
+        resultsRevealed: false,
+        totalResponses: 2,
+        countsByOptionId: { 'opt-yes': 1, 'opt-no': 1 },
+        question: 'Which option?',
+        type: 'binary' as const,
+        options: [
+          { id: 'opt-yes', label: 'Yes' },
+          { id: 'opt-no', label: 'No' },
+        ],
+      };
+      const fetchFn: typeof fetch = async () =>
+        new Response(JSON.stringify({ activePolls: [summary] }), { status: 200 });
+
+      expect(await presenter.loadPolls('https://api.agora.test/', 'presenter-token', fetchFn)).toBe(
+        true,
+      );
+      expect(presenter.getPollResults('poll-arch')?.countsByOptionId['opt-yes']).toBe(1);
+      expect(presenter.getPollsForSlide('slide_0')[0]?.id).toBe('poll-arch');
+      expect(presenter.revealPollResults('poll-arch')).toBe(true);
+      expect(presenter.getProjectorViewState().projectedPollResults?.totalResponses).toBe(2);
+    });
+
     it('manages poll lifecycle (open, close, reveal) and synchronizes with projector', () => {
       const poll = {
         id: 'poll-arch',
@@ -546,14 +573,13 @@ describe('PresenterAppController (SPEC-008, SPEC-011, SPEC-012, SPEC-023)', () =
         timestamp: new Date().toISOString(),
         payload: {
           pollId: 'poll-arch',
-          selectedOptionIds: ['opt-yes'],
           totalResponses: 1,
         },
       });
 
       const resultsBeforeReveal = presenter.getPollResults('poll-arch');
       expect(resultsBeforeReveal?.totalResponses).toBe(1);
-      expect(resultsBeforeReveal?.countsByOptionId['opt-yes']).toBe(1);
+      expect(resultsBeforeReveal?.countsByOptionId['opt-yes']).toBe(0);
 
       // Still unrevealed on projector until presenter explicitly reveals
       expect(presenter.getProjectorViewState().projectedPollResults).toBeNull();
@@ -563,6 +589,22 @@ describe('PresenterAppController (SPEC-008, SPEC-011, SPEC-012, SPEC-023)', () =
       expect(presenter.getActivePollForSlide('slide_0')?.status).toBe('closed');
 
       // 5. Reveal poll results to projector
+      presenter.setPolls(
+        [poll],
+        [
+          {
+            pollId: 'poll-arch',
+            slideId: 'slide_0',
+            status: 'closed',
+            resultsRevealed: false,
+            totalResponses: 1,
+            countsByOptionId: { 'opt-yes': 1, 'opt-no': 0 },
+            question: poll.question,
+            type: poll.type,
+            options: poll.options,
+          },
+        ],
+      );
       expect(presenter.revealPollResults('poll-arch')).toBe(true);
       const revealedProjector = presenter.getProjectorViewState();
       expect(revealedProjector.projectedPoll?.id).toBe('poll-arch');
@@ -571,7 +613,7 @@ describe('PresenterAppController (SPEC-008, SPEC-011, SPEC-012, SPEC-023)', () =
       const revealedProjHtml = renderProjectorViewHtml(revealedProjector);
       expect(revealedProjHtml).toContain('projector-poll-slide');
       expect(revealedProjHtml).toContain('Should we dive into Advanced Clean Architecture?');
-      expect(revealedProjHtml).toContain('opt-yes');
+      expect(revealedProjHtml).toContain('Yes, dive deep');
       expect(revealedProjHtml).toContain('1 votes (100%)');
     });
 

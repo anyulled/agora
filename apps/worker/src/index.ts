@@ -69,15 +69,13 @@ export interface AgoraWorkerAppOptions {
 }
 
 export function sanitizeText(input: string): string {
-  return input
-    .replace(/[\u0000-\u001F\u007F]/g, '')
-    .replace(/(?:javascript|vbscript|data):/gi, '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-    .trim();
+  const withoutControls = Array.from(input)
+    .filter((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint > 0x1f && codePoint !== 0x7f;
+    })
+    .join('');
+  return withoutControls.trim();
 }
 
 export function normalizeWordCloudTerm(input: string): string {
@@ -737,7 +735,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     const doState = asDO(env, sessionId);
     if (!doState) return;
 
-    const optIdStr = optionIds.join(',');
+    const optIdStr = JSON.stringify(optionIds);
     doState.storage.sql.exec(
       `INSERT OR REPLACE INTO poll_votes (poll_id, participant_id, option_id, session_id, created_at)
        VALUES (?, ?, ?, ?, ?)`,
@@ -869,7 +867,16 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       const pId = String(vr.poll_id);
       const partId = String(vr.participant_id);
       const rawOptId = String(vr.option_id);
-      const optIds = rawOptId.includes(',') ? rawOptId.split(',') : [rawOptId];
+      let optIds: string[];
+      try {
+        const parsed: unknown = JSON.parse(rawOptId);
+        optIds =
+          Array.isArray(parsed) && parsed.every((id) => typeof id === 'string')
+            ? parsed
+            : [rawOptId];
+      } catch {
+        optIds = rawOptId.includes(',') ? rawOptId.split(',') : [rawOptId];
+      }
       let voteMap = store.pollVotes.get(pId);
       if (!voteMap) {
         voteMap = new Map();
@@ -1142,6 +1149,15 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
 
     // 0. GET /api/v1/presentations (List all presentations)
     if (method === 'GET' && path === '/api/v1/presentations') {
+      const db = asD1(env);
+      if (db) {
+        const rows = await db
+          .prepare('SELECT id FROM presentations ORDER BY created_at DESC')
+          .all<{ id: string }>();
+        for (const row of rows.results) {
+          await hydratePresentationFromD1(env, row.id);
+        }
+      }
       return jsonResponse(Array.from(store.presentations.values()));
     }
 
@@ -1631,9 +1647,17 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
 
       const questions = store.questions.get(sessionId) || [];
       const sessionPolls = store.polls.get(sessionId) || [];
-      const activePolls: PollResultsSummary[] = sessionPolls.map((poll) =>
-        buildPollResultsSummary(poll),
-      );
+      const isPresenter = authorizePresenter(request, sessionId);
+      const activePolls: PollResultsSummary[] = sessionPolls.map((poll) => {
+        const summary = buildPollResultsSummary(poll);
+        if (!isPresenter && !poll.resultsRevealed) {
+          summary.totalResponses = 0;
+          summary.countsByOptionId = Object.fromEntries(
+            poll.options.map((option) => [option.id, 0]),
+          );
+        }
+        return summary;
+      });
 
       const sessionWordClouds = store.wordClouds.get(sessionId) || [];
       const activeWordClouds: WordCloudAggregate[] = sessionWordClouds.map((wc) =>
@@ -2118,6 +2142,10 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         return errorResponse('Unauthorized: Presenter authentication required', 403);
       }
 
+      if (!(await hydrateSessionFromDO(env, sessionId))) {
+        return errorResponse('Session not found', 404);
+      }
+
       const pollList = store.polls.get(sessionId) || [];
       const poll = pollList.find((p) => p.id === pollId);
       if (!poll) {
@@ -2149,6 +2177,10 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         return errorResponse('Unauthorized: Presenter authentication required', 403);
       }
 
+      if (!(await hydrateSessionFromDO(env, sessionId))) {
+        return errorResponse('Session not found', 404);
+      }
+
       const pollList = store.polls.get(sessionId) || [];
       const poll = pollList.find((p) => p.id === pollId);
       if (!poll) {
@@ -2173,6 +2205,10 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       const pollId = pollRevealMatch[2]!;
       if (!authorizePresenter(request, sessionId)) {
         return errorResponse('Unauthorized: Presenter authentication required', 403);
+      }
+
+      if (!(await hydrateSessionFromDO(env, sessionId))) {
+        return errorResponse('Session not found', 404);
       }
 
       const pollList = store.polls.get(sessionId) || [];
@@ -2243,6 +2279,9 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       if (selectedIds.length === 0) {
         return errorResponse('Must select at least one option', 400);
       }
+      if (new Set(selectedIds).size !== selectedIds.length) {
+        return errorResponse('Duplicate option selections are not allowed', 400);
+      }
 
       const isSingleOrBinary =
         poll.type === 'single' || poll.type === 'single-choice' || poll.type === 'binary';
@@ -2277,8 +2316,6 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
 
       broadcastRealtimeEvent(sessionId, 'poll.voted', {
         pollId,
-        selectedOptionIds: selectedIds,
-        participantId: participant.id,
         totalResponses,
       });
 
@@ -2546,12 +2583,17 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
 }
 
 const defaultApp = createAgoraWorkerApp();
+const configuredApps = new Map<string, ReturnType<typeof createAgoraWorkerApp>>();
 
 export default {
   fetch(request: Request, env: WorkerEnv, _ctx?: unknown): Promise<Response> {
     const adminToken = env?.ADMIN_TOKEN;
     if (adminToken) {
-      const app = createAgoraWorkerApp({ adminToken });
+      let app = configuredApps.get(adminToken);
+      if (!app) {
+        app = createAgoraWorkerApp({ adminToken });
+        configuredApps.set(adminToken, app);
+      }
       return app.fetch(request, env);
     }
     return defaultApp.fetch(request, env);

@@ -1,42 +1,41 @@
 # Agora Session Handoff Document
 
+## Current local run
+- `pnpm dev` starts the local Worker and browser console at http://127.0.0.1:5173.
+- Browser smoke passed: create a presentation, start a session, advance the presenter, and join from the audience tab.
+- API smoke passed: after navigating A → B and joining, `GET /api/v1/sessions/:id` still reported B.
+- Presentation listing loaded from D1 after a server restart. `./init.sh` and `pnpm run verify` passed with 203 tests, workspace builds, lint, typecheck, and victory detector.
+- Reproducer: run `pnpm dev`, open http://127.0.0.1:5173, create a presentation, then open its presenter and audience links in separate tabs.
+
 > Structured session handoff adhering to Harness Engineering Practice 5.
 > Overwritten at the end of each session to guarantee seamless agent handoffs.
 
 ## Verified Now
-- **54 GitHub Code Scanning Findings Resolved**:
-  - `js/polynomial-redos` (7 alerts): Trim operations rewritten as non-regex loop (`while (str.endsWith('/'))`) and `bumpRevision` bounded to `\d{1,9}` to eliminate polynomial time backtracking.
-  - `js/incomplete-multi-character-sanitization` & `js/bad-tag-filter` (8 alerts): `stripHtml` and `sanitizeText` converted into iterative fixed-point sanitization loops with whitespace-tolerant script/style closing tags (`</script\s*>`).
-  - `js/incomplete-url-scheme-check` (1 alert): Proactively strip `javascript:`, `vbscript:`, and `data:` schemes.
-  - `js/clear-text-logging` (1 alert): Cloudflare dashboard registration link sanitized to generic URL without interpolating sensitive `accountId`.
-  - SonarCloud alerts (`typescript:S2245`, `jssecurity:S5145`, `javascript:S4036`, `githubactions:S7637`, `githubactions:S7636`, `typescript:S4790`): All underlying code remediations verified intact.
-- Canonical baseline `./init.sh` verification passes with 15/15 test suites and 193/193 tests.
-- Three-Layer Victory Detector (`pnpm run harness:victory`) passes completely (Layers 1, 2, and 3).
-- Strict TypeScript check (`pnpm run typecheck`) and Biome/ESLint/guardrails pass with 0 errors and 0 warnings.
+- Canonical `./init.sh` passed: harness, architecture, duplication, Mermaid, OpenAPI, Cloudflare emulation, lint, typecheck, and all tests.
+- `pnpm run verify` passed, including workspace build and all three victory layers.
+- 15/15 test files and 203 tests passed.
+- Audience session state hides unrevealed vote totals; presenter-authenticated state receives the authoritative summary.
 
 ## Changed This Session
-- Updated `apps/worker/src/index.ts`: refactored `sanitizeText` to iterative loop stripping script, style, html tags, and unsafe URI schemes.
-- Updated `packages/domain/src/index.ts`: refactored `stripHtml` with whitespace-tolerant regex and loop, non-regex trailing slash trim, and bounded revision match.
-- Updated `packages/application/src/index.ts`: iterative HTML tag strip for display names.
-- Updated `apps/audience/src/index.ts`, `apps/presenter/src/index.ts`, and `packages/reveal-plugin/src/index.ts`: safe trailing slash trimming without regex.
-- Updated `infrastructure/cloudflare/provision.mjs`: removed cleartext `accountId` logging.
-- Updated `packages/domain/src/__tests__/domain.test.ts`: added test coverage for binary and multi-choice polls.
-- Updated `agent-progress.md` and `session-handoff.md`.
+- Fixed poll review findings: preserved reopen state, rejected duplicate selections, stored option IDs as JSON, hydrated polls before lifecycle updates, and removed participant choices/identity from public `poll.voted` events.
+- Added poll loading on mount and socket reconnect; mounted poll controls inside a dedicated child element.
+- Escaped poll text in audience/projector templates and hid option tallies until results are revealed.
+- Added presenter result-summary seeding and prevented local reveal without an authoritative result summary.
+- Updated OpenAPI schemas and `docs/openapi.json`, the Workers & Pages dashboard route, and progress evidence.
 
 ## Broken Or Unverified
-- None. All 15 test suites and 193 tests pass, all 3 victory layers pass.
+- GitHub checks for PR #48 have not rerun because the local fixes are not pushed.
+- Qodo reports its review subscription is inactive; that automated review cannot rerun until workspace billing is restored.
+- The local browser-console smoke test passed, separate from the PR fix verification.
 
 ## Next Best Step
-1. Commit changes using Conventional Commits: `fix(security): resolve all 54 code scanning findings (redos, sanitization, clear-text logging)`.
-2. Push commit to remote `origin/main`.
-3. Monitor GitHub Actions CodeQL Analysis and SonarCloud Code Analysis workflows.
+1. Keep the concurrent local browser-console edits separate from the PR-specific changes.
+2. Commit and push the PR-specific changes to `fix/resolve-code-scanning-findings`.
+3. Review the new GitHub Actions, CodeQL, and SonarCloud results for PR #48.
 
 ## Reproducer & Verification Commands
 ```bash
-# 1. Canonical baseline verification
 ./init.sh
-
-# 2. Three-Layer Victory detector & full verification suite
-pnpm run harness:victory
+pnpm run verify
+gh pr checks 48
 ```
-

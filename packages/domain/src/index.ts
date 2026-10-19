@@ -17,7 +17,7 @@ import type {
   WordCloudAggregate,
   WordCloudPrompt,
 } from '@agora/contracts';
-import { ALLOWED_REACTIONS } from '@agora/contracts';
+import { ALLOWED_REACTIONS, stripHtmlFromText } from '@agora/contracts';
 
 export interface CreatePresentationInput {
   id: string;
@@ -585,10 +585,7 @@ export function canDownloadFullPdf(
 }
 
 function stripHtml(input: string): string {
-  return input
-    .replace(/<|>/g, '')
-    .replace(/(?:javascript|vbscript|data):/gi, '')
-    .trim();
+  return stripHtmlFromText(input);
 }
 
 /**
@@ -758,6 +755,9 @@ export function recordPollVote(
   }
   if (!selectedOptionIds || selectedOptionIds.length === 0) {
     throw new Error('Must select at least one option');
+  }
+  if (new Set(selectedOptionIds).size !== selectedOptionIds.length) {
+    throw new Error('Duplicate option selections are not allowed');
   }
 
   const validOptionIds = new Set(poll.options.map((opt) => opt.id));

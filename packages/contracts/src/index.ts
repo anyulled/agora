@@ -10,6 +10,98 @@ export type ActorRole = 'admin' | 'presenter' | 'attendee';
 
 export const ALLOWED_REACTIONS: readonly Reaction[] = ['👍', '🤔', '❤️', '😴'] as const;
 
+export function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+export function safeUrlAttribute(value: string | null, allowImageData = false): string {
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (allowImageData && /^data:image\/(?:svg\+xml|png|jpeg|gif|webp);/i.test(trimmed)) {
+    return escapeHtml(trimmed);
+  }
+  try {
+    const url = new URL(trimmed, 'https://agora.invalid');
+    if (url.protocol === 'http:' || url.protocol === 'https:') return escapeHtml(trimmed);
+  } catch {
+    // Invalid URL values are omitted from the rendered attribute.
+  }
+  return '#';
+}
+
+export function stripHtmlFromText(input: string): string {
+  const decoded = input
+    .replace(/&lt;|&#0*60;|&#x0*3c;/gi, '<')
+    .replace(/&gt;|&#0*62;|&#x0*3e;/gi, '>');
+  let output = '';
+  let index = 0;
+  while (index < decoded.length) {
+    if (decoded[index] !== '<') {
+      output += decoded[index++];
+      continue;
+    }
+    const tagStart = index;
+    let cursor = index + 1;
+    while (cursor < decoded.length && decoded[cursor] !== '>') cursor++;
+    if (cursor === decoded.length) {
+      output += decoded.slice(tagStart);
+      break;
+    }
+    const tag = decoded.slice(tagStart + 1, cursor).trim();
+    const closing = tag.startsWith('/');
+    const name = tag
+      .replace(/^\//, '')
+      .split(/[\s/>]/, 1)[0]
+      ?.toLowerCase();
+    index = cursor + 1;
+    if (!closing && (name === 'script' || name === 'style')) {
+      const closePrefix = `</${name}`;
+      let closeStart = -1;
+      for (let candidate = index; candidate <= decoded.length - closePrefix.length; candidate++) {
+        if (
+          decoded.slice(candidate, candidate + closePrefix.length).toLowerCase() !== closePrefix
+        ) {
+          continue;
+        }
+        const boundary = decoded[candidate + closePrefix.length];
+        if (
+          boundary === '>' ||
+          boundary === '/' ||
+          boundary === ' ' ||
+          boundary === '\t' ||
+          boundary === '\n' ||
+          boundary === '\r'
+        ) {
+          closeStart = candidate;
+          break;
+        }
+      }
+      if (closeStart < 0) break;
+      let closeEnd = closeStart + name.length + 2;
+      while (closeEnd < decoded.length && decoded[closeEnd] !== '>') closeEnd++;
+      index = closeEnd < decoded.length ? closeEnd + 1 : decoded.length;
+    }
+  }
+  let safeText = '';
+  for (let cursor = 0; cursor < output.length; ) {
+    const javascriptScheme = output.slice(cursor, cursor + 11).toLowerCase();
+    const vbscriptScheme = output.slice(cursor, cursor + 9).toLowerCase();
+    if (javascriptScheme === 'javascript:') {
+      cursor += 'javascript:'.length;
+    } else if (vbscriptScheme === 'vbscript:') {
+      cursor += 'vbscript:'.length;
+    } else {
+      safeText += output[cursor++];
+    }
+  }
+  return safeText.replace(/[<>]/g, '').trim();
+}
+
 export interface PresentationBranding {
   colors: Record<string, string>;
   logoAssetId?: string;
@@ -309,4 +401,89 @@ export interface WebSocketLike {
   onmessage?: ((event: { data: unknown }) => void) | ((event: unknown) => void) | null;
   onclose?: ((event?: unknown) => void) | null;
   onerror?: ((event?: unknown) => void) | null;
+}
+
+export function applyPollVoted(
+  existingSummary: PollResultsSummary | undefined,
+  poll:
+    | {
+        id: string;
+        slideId: string;
+        status?: PollStatus;
+        resultsRevealed?: boolean;
+        options: PollOption[];
+      }
+    | undefined,
+  payload: { pollId: string; totalResponses?: number },
+): PollResultsSummary {
+  const summary: PollResultsSummary = existingSummary ?? {
+    pollId: payload.pollId,
+    slideId: poll?.slideId ?? '',
+    status: poll?.status ?? 'open',
+    resultsRevealed: poll?.resultsRevealed ?? false,
+    totalResponses: payload.totalResponses ?? 0,
+    countsByOptionId: poll ? Object.fromEntries(poll.options.map((o) => [o.id, 0])) : {},
+  };
+  if (payload.totalResponses !== undefined) {
+    summary.totalResponses = payload.totalResponses;
+  }
+  return summary;
+}
+
+export function applyPollResults(
+  poll: { id: string; slideId: string; status?: PollStatus } | undefined,
+  payload: {
+    pollId?: string;
+    results?: Record<string, number>;
+    totalVotes?: number;
+    summary?: PollResultsSummary;
+  },
+): PollResultsSummary | null {
+  if (payload.summary) {
+    return payload.summary;
+  }
+  if (payload.pollId) {
+    return {
+      pollId: payload.pollId,
+      slideId: poll?.slideId ?? '',
+      status: poll?.status ?? 'closed',
+      resultsRevealed: true,
+      totalResponses: payload.totalVotes ?? 0,
+      countsByOptionId: payload.results ?? {},
+    };
+  }
+  return null;
+}
+
+export function processPollRealtimeEvent(
+  type: string,
+  payload: unknown,
+  poll:
+    | {
+        id: string;
+        slideId: string;
+        status?: PollStatus;
+        resultsRevealed?: boolean;
+        options: PollOption[];
+      }
+    | undefined,
+  existingSummary?: PollResultsSummary,
+): PollResultsSummary | null {
+  if (type === 'poll.voted') {
+    const p = payload as { pollId?: string; totalResponses?: number };
+    if (!p?.pollId) return null;
+    return applyPollVoted(existingSummary, poll, p as { pollId: string; totalResponses?: number });
+  }
+  if (type === 'poll.results') {
+    return applyPollResults(
+      poll,
+      payload as {
+        pollId?: string;
+        results?: Record<string, number>;
+        totalVotes?: number;
+        summary?: PollResultsSummary;
+      },
+    );
+  }
+  return null;
 }

@@ -1,6 +1,6 @@
 {
   "project": "agora",
-  "last_updated": "2026-10-18",
+  "last_updated": "2026-10-19",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
@@ -40,6 +40,12 @@
           "timestamp": "2026-10-19T00:06:34Z",
           "result": "passed",
           "assertions": 18
+        },
+        {
+          "type": "local_smoke",
+          "target": "pnpm dev: create presentation and list it after restart",
+          "timestamp": "2026-10-19T12:49:00Z",
+          "result": "passed"
         }
       ],
       "notes": "Includes D1 SQLite persistence, slide_metadata view, deterministic SHA-256 revision hashing, PUT/PATCH CRUD, and R2/D1 stale asset invalidation."
@@ -72,6 +78,12 @@
           "timestamp": "2026-10-19T00:40:00Z",
           "result": "passed",
           "assertions": 35
+        },
+        {
+          "type": "local_smoke",
+          "target": "pnpm dev: create session, navigate slide, join audience",
+          "timestamp": "2026-10-19T12:49:00Z",
+          "result": "passed"
         }
       ],
       "notes": "Includes scheduled -> live -> completed lifecycle, Durable Object SQLite persistence (session_state, participants, _do_kv), WebSocket reconnect state restoration, Admin/Presenter QR code & join URL rendering, and OpenAPI 3.1.0 endpoint documentation."
@@ -366,10 +378,7 @@
       "title": "Contextual polls",
       "user_visible_behavior": "Supports single-choice, multiple-choice, and binary polls anchored to slides. Presenter opens/closes polls and reveals live aggregated results on the projected deck. Responses persist in SQLite with one response per participant rule.",
       "status": "passing",
-      "verification": [
-        "vitest run packages/domain/tests/polls.test.ts",
-        "vitest run apps/worker/tests/polls.test.ts"
-      ],
+      "verification": ["pnpm run verify"],
       "evidence": [
         {
           "type": "unit_test",
@@ -377,6 +386,13 @@
           "timestamp": "2026-10-18T20:44:50Z",
           "result": "passed",
           "assertions": 10
+        },
+        {
+          "type": "test_suite",
+          "target": "pnpm run verify",
+          "timestamp": "2026-10-19T12:59:28Z",
+          "result": "passed",
+          "assertions": 203
         }
       ],
       "notes": "Enforces strict participant voting constraints server-side."

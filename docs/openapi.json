@@ -1448,7 +1448,7 @@
                   },
                   "type": {
                     "type": "string",
-                    "enum": ["single", "multiple", "binary"]
+                    "enum": ["single", "single-choice", "multiple", "multiple-choice", "binary"]
                   },
                   "options": {
                     "type": "array",
@@ -1543,10 +1543,21 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["optionId"],
                 "properties": {
+                  "selectedOptionIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "selectedOptionId": {
+                    "type": "string",
+                    "deprecated": true
+                  },
                   "optionId": {
-                    "type": "string"
+                    "type": "string",
+                    "deprecated": true
                   }
                 }
               }
@@ -2483,7 +2494,7 @@
           },
           "type": {
             "type": "string",
-            "enum": ["single", "multiple", "binary"]
+            "enum": ["single", "single-choice", "multiple", "multiple-choice", "binary"]
           },
           "options": {
             "type": "array",
@@ -2523,6 +2534,19 @@
             "type": "object",
             "additionalProperties": {
               "type": "integer"
+            }
+          },
+          "question": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["single", "single-choice", "multiple", "multiple-choice", "binary"]
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object"
             }
           }
         }

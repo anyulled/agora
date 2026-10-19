@@ -1,5 +1,7 @@
 import {
   ALLOWED_REACTIONS,
+  escapeHtml,
+  safeUrlAttribute,
   type AudienceMode,
   type AudienceQuestion,
   type AudienceSafeSessionView,
@@ -391,10 +393,12 @@ export class AudienceAppController {
           question?: string;
           options?: Array<{ id: string; label?: string; text?: string }>;
           type?: string;
+          resultsRevealed?: boolean;
           countsByOptionId?: Record<string, number>;
         };
         const pollId = p?.pollId ?? p?.id;
         if (pollId) {
+          const existingPoll = this.polls.find((item) => item.pollId === pollId);
           const counts: Record<string, number> = {};
           if (p.options && Array.isArray(p.options)) {
             for (const opt of p.options) {
@@ -405,9 +409,9 @@ export class AudienceAppController {
             pollId,
             slideId: p.slideId ?? '',
             status: 'open',
-            resultsRevealed: false,
-            totalResponses: 0,
-            countsByOptionId: p.countsByOptionId ?? counts,
+            resultsRevealed: p.resultsRevealed ?? existingPoll?.resultsRevealed ?? false,
+            totalResponses: existingPoll?.totalResponses ?? 0,
+            countsByOptionId: p.countsByOptionId ?? existingPoll?.countsByOptionId ?? counts,
             question: p.question,
             type: p.type as PollType,
             options: p.options as PollOption[],
@@ -1232,11 +1236,11 @@ export function renderAudienceHtml(vm: AudienceViewModel): string {
 
   // Downloads bar
   const pngBtn = vm.canDownloadCurrentSlidePng
-    ? `<a href="${vm.currentSlidePngUrl}" class="btn-download" download aria-label="Download current slide PNG">Download Slide PNG</a>`
+    ? `<a href="${safeUrlAttribute(vm.currentSlidePngUrl)}" class="btn-download" download aria-label="Download current slide PNG">Download Slide PNG</a>`
     : '<button class="btn-download" disabled title="Slide image not unlocked or unavailable">Slide PNG Locked</button>';
 
   const pdfBtn = vm.canDownloadDeckPdf
-    ? `<a href="${vm.deckPdfUrl}" class="btn-download-pdf" download aria-label="Download full presentation PDF">Download Full Deck (PDF)</a>`
+    ? `<a href="${safeUrlAttribute(vm.deckPdfUrl)}" class="btn-download-pdf" download aria-label="Download full presentation PDF">Download Full Deck (PDF)</a>`
     : '<button class="btn-download-pdf" disabled title="Full deck download unlocks at presentation conclusion">Deck PDF Locked</button>';
 
   // Active Poll widget
@@ -1249,7 +1253,7 @@ export function renderAudienceHtml(vm: AudienceViewModel): string {
     const optionsHtml = Object.entries(poll.countsByOptionId)
       .map(([optId, count]) => {
         const opt = poll.options?.find((o) => o.id === optId);
-        const labelText = opt?.label || opt?.text || `Option: ${optId}`;
+        const labelText = escapeHtml(opt?.label || opt?.text || `Option: ${optId}`);
         const pct = poll.totalResponses > 0 ? Math.round((count / totalVotes) * 100) : 0;
         const resultBar = isRevealed
           ? `<div class="poll-bar-track"><div class="poll-bar-fill" style="width: ${pct}%"></div></div>`
@@ -1257,16 +1261,16 @@ export function renderAudienceHtml(vm: AudienceViewModel): string {
 
         return `
         <li class="poll-option-item">
-          <button class="btn-poll-option" data-action="vote-poll" data-poll-id="${poll.pollId}" data-option-id="${optId}">
+          <button class="btn-poll-option" data-action="vote-poll" data-poll-id="${escapeHtml(poll.pollId)}" data-option-id="${escapeHtml(optId)}" ${poll.status === 'open' ? '' : 'disabled'}>
             <span>${labelText}</span>
-            <span class="poll-vote-count">(${count} votes${isRevealed ? `, ${pct}%` : ''})</span>
+            ${isRevealed ? `<span class="poll-vote-count">(${count} votes, ${pct}%)</span>` : ''}
           </button>
           ${resultBar}
         </li>`;
       })
       .join('');
 
-    const heading = poll.question ? `Live Poll: ${poll.question}` : 'Live Poll';
+    const heading = poll.question ? `Live Poll: ${escapeHtml(poll.question)}` : 'Live Poll';
     const footerText = isRevealed
       ? `Results revealed &bull; Total responses: ${poll.totalResponses}`
       : 'Select an option to cast your vote';
@@ -1287,7 +1291,7 @@ export function renderAudienceHtml(vm: AudienceViewModel): string {
     wordCloudWidget = `
       <section class="card wordcloud-widget" aria-label="Active Word Cloud">
         <h4>Word Cloud Submission</h4>
-        <form class="wordcloud-form" data-action="submit-wordcloud" data-prompt-id="${vm.activeWordCloud.promptId}">
+        <form class="wordcloud-form" data-action="submit-wordcloud" data-prompt-id="${escapeHtml(vm.activeWordCloud.promptId)}">
           <input type="text" name="term" maxlength="50" placeholder="Enter a single word or short term" required aria-label="Word cloud term" />
           <button type="submit" class="btn-primary">Submit</button>
         </form>
@@ -1298,13 +1302,13 @@ export function renderAudienceHtml(vm: AudienceViewModel): string {
   const questionItems = vm.questions
     .map(
       (q) => `
-      <article class="question-item" data-question-id="${q.id}">
+      <article class="question-item" data-question-id="${escapeHtml(q.id)}">
         <div class="question-content">
-          <p class="question-text">${q.content}</p>
-          <span class="question-author">— ${q.participantName ?? 'Anonymous'}</span>
+          <p class="question-text">${escapeHtml(q.content)}</p>
+          <span class="question-author">— ${escapeHtml(q.participantName ?? 'Anonymous')}</span>
         </div>
         <div class="question-actions">
-          <button class="btn-upvote" data-action="toggle-upvote" data-question-id="${q.id}" aria-label="Upvote question, current upvotes ${q.upvotes}">
+          <button class="btn-upvote" data-action="toggle-upvote" data-question-id="${escapeHtml(q.id)}" aria-label="Upvote question, current upvotes ${q.upvotes}">
             ▲ ${q.upvotes}
           </button>
         </div>
@@ -1330,7 +1334,7 @@ export function renderAudienceHtml(vm: AudienceViewModel): string {
                 : `<span class="indicator-solo">Solo Browsing (Slide ${vm.activeSlideIndex} of ${vm.totalRevealedSlides})</span>`
             }
           </div>
-          <h3 class="slide-title">${slideTitle}</h3>
+          <h3 class="slide-title">${escapeHtml(slideTitle)}</h3>
           <p class="slide-position-indicator" aria-label="Slide position">${vm.positionIndicator}</p>
           <p class="slide-number-indicator">${slideCountLabel}</p>
         </section>

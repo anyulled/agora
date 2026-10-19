@@ -1,5 +1,6 @@
 import {
   ALLOWED_REACTIONS,
+  stripHtmlFromText,
   type ActorRole,
   type AssetManifest,
   type AssetManifestEntry,
@@ -687,13 +688,7 @@ export class AgoraPlatformService {
 
     let displayName: string | undefined;
     if (rawDisplayName) {
-      let prev = '';
-      let curr = rawDisplayName;
-      while (curr !== prev) {
-        prev = curr;
-        curr = curr.replace(/<[^>]*>/g, '');
-      }
-      const stripped = curr.trim();
+      const stripped = stripHtmlFromText(rawDisplayName).trim();
       if (stripped.length > 0) {
         displayName = stripped.slice(0, 50);
       }

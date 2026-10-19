@@ -1,5 +1,8 @@
 import {
   ALLOWED_REACTIONS,
+  escapeHtml,
+  processPollRealtimeEvent,
+  safeUrlAttribute,
   type AssetManifest,
   type AudienceQuestion,
   type NavigationSuggestion,
@@ -431,61 +434,16 @@ export class PresenterAppController {
           this.notifyListeners();
         }
       }
-    } else if (event.type === 'poll.voted') {
-      const p = event.payload as {
-        pollId?: string;
-        selectedOptionIds?: string[];
-        totalResponses?: number;
-      };
-      if (p?.pollId) {
-        let summary = this.pollResults.get(p.pollId);
-        if (!summary) {
-          const poll = this.polls.find((item) => item.id === p.pollId);
-          summary = {
-            pollId: p.pollId,
-            slideId: poll?.slideId ?? '',
-            status: poll?.status ?? 'open',
-            resultsRevealed: poll?.resultsRevealed ?? false,
-            totalResponses: p.totalResponses ?? 0,
-            countsByOptionId: poll ? Object.fromEntries(poll.options.map((o) => [o.id, 0])) : {},
-          };
-          this.pollResults.set(p.pollId, summary);
-        }
-        if (p.totalResponses !== undefined) {
-          summary.totalResponses = p.totalResponses;
-        }
-        if (p.selectedOptionIds) {
-          for (const optId of p.selectedOptionIds) {
-            summary.countsByOptionId[optId] = (summary.countsByOptionId[optId] ?? 0) + 1;
-          }
-        }
-        this.notifyListeners();
-      }
-    } else if (event.type === 'poll.results') {
-      const p = event.payload as {
-        pollId?: string;
-        results?: Record<string, number>;
-        totalVotes?: number;
-        resultsRevealed?: boolean;
-        summary?: PollResultsSummary;
-      };
-      const summary =
-        p.summary ??
-        (p.pollId
-          ? {
-              pollId: p.pollId,
-              slideId: this.polls.find((item) => item.id === p.pollId)?.slideId ?? '',
-              status: this.polls.find((item) => item.id === p.pollId)?.status ?? 'closed',
-              resultsRevealed: true,
-              totalResponses: p.totalVotes ?? 0,
-              countsByOptionId: p.results ?? {},
-            }
-          : null);
-      if (summary) {
-        this.pollResults.set(summary.pollId, summary);
-        const target = this.polls.find((item) => item.id === summary.pollId);
-        if (target) {
-          target.resultsRevealed = true;
+    } else if (event.type === 'poll.voted' || event.type === 'poll.results') {
+      const summary = this.pollResults.get((event.payload as { pollId?: string })?.pollId || '');
+      const poll = this.polls.find(
+        (item) => item.id === (event.payload as { pollId?: string })?.pollId,
+      );
+      const res = processPollRealtimeEvent(event.type, event.payload, poll, summary);
+      if (res) {
+        this.pollResults.set(res.pollId, res);
+        if (event.type === 'poll.results' && poll) {
+          poll.resultsRevealed = true;
         }
         this.notifyListeners();
       }
@@ -493,9 +451,52 @@ export class PresenterAppController {
   }
 
   // SPEC-010: Contextual polls management
-  setPolls(polls: PollDefinition[]): void {
+  setPolls(polls: PollDefinition[], results: PollResultsSummary[] = []): void {
     this.polls = polls.map((p) => ({ ...p, options: p.options.map((o) => ({ ...o })) }));
+    for (const summary of results) {
+      this.pollResults.set(summary.pollId, {
+        ...summary,
+        countsByOptionId: { ...summary.countsByOptionId },
+      });
+    }
     this.notifyListeners();
+  }
+
+  async loadPolls(
+    endpoint: string,
+    presenterToken: string,
+    fetchImplementation: typeof fetch = fetch,
+  ): Promise<boolean> {
+    let base = endpoint;
+    while (base.endsWith('/')) base = base.slice(0, -1);
+    try {
+      const response = await fetchImplementation(
+        `${base}/api/v1/sessions/${encodeURIComponent(this.session.id)}`,
+        { headers: { Authorization: `Bearer ${presenterToken}` } },
+      );
+      if (!response.ok) return false;
+      const state = (await response.json()) as { activePolls?: PollResultsSummary[] };
+      const results = Array.isArray(state.activePolls) ? state.activePolls : [];
+      const polls = results.flatMap((summary): PollDefinition[] => {
+        if (!summary.question || !summary.type || !summary.options) return [];
+        return [
+          {
+            id: summary.pollId,
+            sessionId: this.session.id,
+            slideId: summary.slideId,
+            question: summary.question,
+            type: summary.type,
+            options: summary.options,
+            status: summary.status,
+            resultsRevealed: summary.resultsRevealed,
+          },
+        ];
+      });
+      this.setPolls(polls, results);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   addPoll(poll: PollDefinition): void {
@@ -549,24 +550,10 @@ export class PresenterAppController {
   revealPollResults(pollId: string): boolean {
     const poll = this.polls.find((p) => p.id === pollId);
     if (!poll) return false;
+    const summary = this.pollResults.get(pollId);
+    if (!summary) return false;
     poll.resultsRevealed = true;
-    let summary = this.pollResults.get(pollId);
-    if (!summary) {
-      summary = {
-        pollId,
-        slideId: poll.slideId,
-        status: poll.status,
-        resultsRevealed: true,
-        totalResponses: 0,
-        countsByOptionId: Object.fromEntries(poll.options.map((o) => [o.id, 0])),
-        question: poll.question,
-        type: poll.type,
-        options: poll.options,
-      };
-      this.pollResults.set(pollId, summary);
-    } else {
-      summary.resultsRevealed = true;
-    }
+    summary.resultsRevealed = true;
     this.notifyListeners();
     return true;
   }
@@ -772,7 +759,7 @@ export function renderPresenterViewHtml(state: PresenterViewState): string {
       const q = state.qaState.selectedQuestion;
       const slideImageBlock = state.qaState.hasReferencedSlidePng
         ? `<div class="referenced-slide-preview">
-             <img src="${state.qaState.referencedSlidePngUrl}" alt="Referenced Slide ${q.slideId}" class="slide-static-img" />
+             <img src="${safeUrlAttribute(state.qaState.referencedSlidePngUrl)}" alt="Referenced Slide ${escapeHtml(q.slideId)}" class="slide-static-img" />
            </div>`
         : `<div class="referenced-slide-fallback">
              <p>Static slide preview image unavailable for this slide.</p>
@@ -783,13 +770,13 @@ export function renderPresenterViewHtml(state: PresenterViewState): string {
           <div class="qa-detail-header">
             <button class="btn-back" data-action="qa-back">&larr; Back to List (Esc)</button>
             <div class="qa-status-controls">
-              <button class="btn-status" data-action="qa-mark-answered" data-id="${q.id}">Mark Answered</button>
-              <button class="btn-status" data-action="qa-mark-dismissed" data-id="${q.id}">Dismiss</button>
+              <button class="btn-status" data-action="qa-mark-answered" data-id="${escapeHtml(q.id)}">Mark Answered</button>
+              <button class="btn-status" data-action="qa-mark-dismissed" data-id="${escapeHtml(q.id)}">Dismiss</button>
             </div>
           </div>
           <article class="question-featured">
-            <h3>"${q.content}"</h3>
-            <p class="question-meta">Submitted by ${q.participantName ?? 'Anonymous'} &bull; ${q.upvotes} upvotes</p>
+            <h3>"${escapeHtml(q.content)}"</h3>
+            <p class="question-meta">Submitted by ${escapeHtml(q.participantName ?? 'Anonymous')} &bull; ${q.upvotes} upvotes</p>
           </article>
           ${slideImageBlock}
         </div>`;
@@ -814,7 +801,7 @@ export function renderPresenterViewHtml(state: PresenterViewState): string {
         const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
         return `
           <li class="presenter-poll-option">
-            <span>${opt.label || opt.text || opt.id}</span>
+            <span>${escapeHtml(opt.label || opt.text || opt.id)}</span>
             <span class="poll-opt-votes">${count} votes (${pct}%)</span>
           </li>`;
       })
@@ -823,16 +810,16 @@ export function renderPresenterViewHtml(state: PresenterViewState): string {
     pollControlHtml = `
       <section class="card poll-control-panel" aria-label="Slide Poll Controls">
         <header class="poll-header">
-          <h4>Poll: ${p.question}</h4>
+          <h4>Poll: ${escapeHtml(p.question)}</h4>
           <span class="poll-badge status-${p.status}">${p.status.toUpperCase()}</span>
         </header>
         <ul class="presenter-poll-options">
           ${optionsHtml}
         </ul>
         <div class="poll-actions">
-          ${p.status !== 'open' ? `<button class="btn-poll-open" data-action="open-poll" data-id="${p.id}">Open Poll</button>` : ''}
-          ${p.status === 'open' ? `<button class="btn-poll-close" data-action="close-poll" data-id="${p.id}">Close Poll</button>` : ''}
-          ${!p.resultsRevealed ? `<button class="btn-poll-reveal" data-action="reveal-poll" data-id="${p.id}">Reveal on Projector</button>` : '<span class="revealed-badge">Revealed on Projector</span>'}
+          ${p.status !== 'open' ? `<button class="btn-poll-open" data-action="open-poll" data-id="${escapeHtml(p.id)}">Open Poll</button>` : ''}
+          ${p.status === 'open' ? `<button class="btn-poll-close" data-action="close-poll" data-id="${escapeHtml(p.id)}">Close Poll</button>` : ''}
+          ${!p.resultsRevealed ? `<button class="btn-poll-reveal" data-action="reveal-poll" data-id="${escapeHtml(p.id)}">Reveal on Projector</button>` : '<span class="revealed-badge">Revealed on Projector</span>'}
         </div>
       </section>`;
   }
@@ -840,8 +827,8 @@ export function renderPresenterViewHtml(state: PresenterViewState): string {
   const sessionJoinBanner =
     state.audienceUrl || state.qrCodeDataUrl
       ? `<div class="session-join-banner">
-          ${state.audienceUrl ? `<p class="presenter-join-url">Join: <a href="${state.audienceUrl}">${state.audienceUrl}</a></p>` : ''}
-          ${state.qrCodeDataUrl ? `<img src="${state.qrCodeDataUrl}" alt="Audience join QR code" class="presenter-qr-code" />` : ''}
+          ${state.audienceUrl ? `<p class="presenter-join-url">Join: <a href="${safeUrlAttribute(state.audienceUrl)}">${escapeHtml(state.audienceUrl)}</a></p>` : ''}
+          ${state.qrCodeDataUrl ? `<img src="${safeUrlAttribute(state.qrCodeDataUrl, true)}" alt="Audience join QR code" class="presenter-qr-code" />` : ''}
         </div>`
       : '';
 
@@ -850,7 +837,7 @@ export function renderPresenterViewHtml(state: PresenterViewState): string {
       ${suggestionBanner}
       <div class="console-body">
         <section class="slide-viewport" aria-label="Active Slide Viewport">
-          <h2 class="slide-title-display">${state.currentSlide?.title ?? 'No slide'}</h2>
+          <h2 class="slide-title-display">${escapeHtml(state.currentSlide?.title ?? 'No slide')}</h2>
           <span class="coordinates-indicator">Coordinates: [${state.horizontalIndex}, ${state.verticalIndex}]</span>
           ${qaViewHtml}
           ${pollControlHtml}
@@ -923,7 +910,7 @@ export function renderProjectorViewHtml(state: ProjectorViewState): string {
         return `
         <li class="projector-poll-option">
           <div class="poll-opt-header">
-            <span class="poll-opt-label">${optId}</span>
+            <span class="poll-opt-label">${escapeHtml(res.options?.find((option) => option.id === optId)?.label ?? res.options?.find((option) => option.id === optId)?.text ?? optId)}</span>
             <span class="poll-opt-stat">${count} votes (${pct}%)</span>
           </div>
           <div class="poll-progress-track">
@@ -935,7 +922,7 @@ export function renderProjectorViewHtml(state: ProjectorViewState): string {
 
     content = `
       <div class="projector-poll-slide" data-component="audience-poll">
-        <h2>${state.projectedPoll?.question ?? 'Live Poll Results'}</h2>
+        <h2>${escapeHtml(state.projectedPoll?.question ?? 'Live Poll Results')}</h2>
         <ul class="projector-poll-options">
           ${optionsHtml}
         </ul>
@@ -946,7 +933,7 @@ export function renderProjectorViewHtml(state: ProjectorViewState): string {
   } else {
     content = `
       <div class="projector-slide-content">
-        <h1>${state.currentSlide?.title ?? state.presentationTitle}</h1>
+        <h1>${escapeHtml(state.currentSlide?.title ?? state.presentationTitle)}</h1>
       </div>`;
   }
 

@@ -584,16 +584,26 @@
   2. Maintain 100% test pass rate and Clean Architecture pure domain boundaries.
   3. Verify `./init.sh` and Three-Layer Victory Detector (`pnpm run harness:victory`).
 - **Completed**:
-  - Refactored `sanitizeText` in `apps/worker/src/index.ts` to iteratively strip `<script>`, `<style>`, HTML tags, and `javascript:`, `vbscript:`, and `data:` schemes.
-  - Refactored `stripHtml` in `packages/domain/src/index.ts` to iteratively strip `<script>`, `<style>`, and HTML tags with closing tag whitespace handling (`</script\s*>`).
-  - Refactored `rawDisplayName` sanitization in `packages/application/src/index.ts` to iteratively strip HTML tags.
+  - Updated `sanitizeText` in `apps/worker/src/index.ts` to remove control characters while preserving raw stored text; HTML is escaped at renderer boundaries and URL schemes are checked only for URL attributes.
+  - Routed domain question cleanup through a bounded shared scanner that removes HTML tags and script/style contents, handles encoded angle brackets, preserves ordinary text such as `metadata:`, and removes nested `javascript:`/`vbscript:` prefixes.
+  - Reused the shared HTML text sanitizer for participant display names, eliminating a backtracking tag-stripping expression.
   - Eliminated polynomial ReDoS regexes across `packages/domain/src/index.ts`, `apps/audience/src/index.ts`, `apps/presenter/src/index.ts`, and `packages/reveal-plugin/src/index.ts` by replacing `replace(/\/+$/, '')` with `while (str.endsWith('/')) str = str.slice(0, -1)`.
   - Replaced ambiguous revision matching `/^(.*?)(\d+)$/` in `bumpRevision` with bounded non-backtracking `/^(.*?)(\d{1,9})$/`.
   - Replaced dynamic Cloudflare account onboarding URL logging in `infrastructure/cloudflare/provision.mjs` with generic link without expanding `accountId`.
   - Verified and fixed all poll type tests in `packages/domain/src/__tests__/domain.test.ts`.
-  - Verified and passed `./init.sh` and Three-Layer Victory Detector (`pnpm run harness:victory`).
+  - Fixed the PR review issues around poll state hydration, audience result privacy, duplicate choices, vote persistence, escaped poll text, OpenAPI schemas, poll loading after reconnect, and preserving authored slide content.
 - **Verification Evidence**:
-  - `./init.sh`: 15/15 test suites (193 tests) passing cleanly.
-  - `pnpm run harness:victory`: 🏆 VICTORY DETECTED (Layers 1, 2, and 3 passing).
+  - `./init.sh`: 15/15 test files and 203 tests passed; harness, architecture, duplication, Mermaid, OpenAPI, lint, typecheck, and Cloudflare emulation checks passed.
+  - `pnpm run verify`: workspace build and all three victory layers passed; 15/15 test files and 203 tests passed.
   - `pnpm run typecheck && pnpm run lint`: 0 errors, 0 warnings.
 
+
+
+### PR #48 unblock follow-up — 2026-10-19
+- Corrected the prior Session 026 sanitization and verification notes to match the implementation and rerun results.
+- Confirmed the public session endpoint hides unrevealed vote totals while presenter-authenticated state returns authoritative poll summaries.
+- Added duplicate selection rejection at both Worker and domain boundaries, JSON poll vote persistence for IDs containing commas, and poll recovery on mount and WebSocket reconnect.
+- Escaped audience/projector poll text, hid vote counts until reveal, preserved poll state on reopen, and mounted poll rendering into a dedicated slide child.
+- Updated poll vote/OpenAPI schemas, the Cloudflare Workers & Pages onboarding link, and the generated OpenAPI document.
+- Verification: `./init.sh` and `pnpm run verify` passed; 15/15 test files and 203 tests passed, with all workspace builds and victory layers passing.
+- Remote PR checks have not rerun because these changes are local and not yet pushed.
