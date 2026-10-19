@@ -519,7 +519,11 @@ export class PresenterAppController {
   getActivePollForSlide(slideId?: string): PollDefinition | null {
     const targetSlideId = slideId ?? this.getCurrentSlide()?.id;
     if (!targetSlideId) return null;
-    return this.polls.find((p) => p.slideId === targetSlideId && p.status === 'open') ?? null;
+    return (
+      this.polls.find((p) => p.slideId === targetSlideId && p.status === 'open') ??
+      this.polls.find((p) => p.slideId === targetSlideId) ??
+      null
+    );
   }
 
   getPollResults(pollId: string): PollResultsSummary | null {

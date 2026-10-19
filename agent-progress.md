@@ -569,3 +569,31 @@
   - `docs/assets/agora-banner.jpg`: Verified image asset created and referenced in `README.md`.
   - `./init.sh`: 15/15 test suites (193 tests) passing.
   - `pnpm run harness:victory`: All 3 layers verified passing.
+
+---
+
+## Session 026 — 2026-10-19
+- **Role**: Code Scanning & Security Remediation Engineer
+- **Goals**:
+  1. Inspect and resolve all 54 GitHub Code Scanning findings (CodeQL & SonarCloud alerts):
+     - `js/polynomial-redos` (7 alerts): Rewrite URL trimming regexes and revision pattern to eliminate polynomial backtracking.
+     - `js/incomplete-multi-character-sanitization` & `js/bad-tag-filter` (8 alerts): Implement robust iterative sanitization for HTML/script tags and strip dangerous URI schemes (`javascript:`, `vbscript:`, `data:`).
+     - `js/incomplete-url-scheme-check` (1 alert): Include `data:` and `vbscript:` in URL scheme validation alongside `javascript:`.
+     - `js/clear-text-logging` (1 alert): Remove sensitive `accountId` parameter from log messages in `infrastructure/cloudflare/provision.mjs`.
+     - SonarCloud alerts (`typescript:S2245`, `jssecurity:S5145`, `javascript:S4036`, `githubactions:S7637`, `githubactions:S7636`, `typescript:S4790`): Verify all previous code-level remediations are in place and clean.
+  2. Maintain 100% test pass rate and Clean Architecture pure domain boundaries.
+  3. Verify `./init.sh` and Three-Layer Victory Detector (`pnpm run harness:victory`).
+- **Completed**:
+  - Refactored `sanitizeText` in `apps/worker/src/index.ts` to iteratively strip `<script>`, `<style>`, HTML tags, and `javascript:`, `vbscript:`, and `data:` schemes.
+  - Refactored `stripHtml` in `packages/domain/src/index.ts` to iteratively strip `<script>`, `<style>`, and HTML tags with closing tag whitespace handling (`</script\s*>`).
+  - Refactored `rawDisplayName` sanitization in `packages/application/src/index.ts` to iteratively strip HTML tags.
+  - Eliminated polynomial ReDoS regexes across `packages/domain/src/index.ts`, `apps/audience/src/index.ts`, `apps/presenter/src/index.ts`, and `packages/reveal-plugin/src/index.ts` by replacing `replace(/\/+$/, '')` with `while (str.endsWith('/')) str = str.slice(0, -1)`.
+  - Replaced ambiguous revision matching `/^(.*?)(\d+)$/` in `bumpRevision` with bounded non-backtracking `/^(.*?)(\d{1,9})$/`.
+  - Replaced dynamic Cloudflare account onboarding URL logging in `infrastructure/cloudflare/provision.mjs` with generic link without expanding `accountId`.
+  - Verified and fixed all poll type tests in `packages/domain/src/__tests__/domain.test.ts`.
+  - Verified and passed `./init.sh` and Three-Layer Victory Detector (`pnpm run harness:victory`).
+- **Verification Evidence**:
+  - `./init.sh`: 15/15 test suites (193 tests) passing cleanly.
+  - `pnpm run harness:victory`: 🏆 VICTORY DETECTED (Layers 1, 2, and 3 passing).
+  - `pnpm run typecheck && pnpm run lint`: 0 errors, 0 warnings.
+
