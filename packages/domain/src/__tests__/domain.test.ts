@@ -652,6 +652,57 @@ describe('Domain Logic — SPEC-001 through SPEC-024', () => {
       expect(() => recordPollVote(poll, existing, 'part-1', ['opt-a', 'opt-b'])).toThrow(
         "Poll type 'single' requires exactly one selection",
       );
+
+      const binaryPoll: PollDefinition = {
+        id: 'poll-bin',
+        sessionId: 'sess-1',
+        slideId: 'slide-2',
+        question: 'Is TypeScript awesome?',
+        type: 'binary',
+        options: [
+          { id: 'opt-yes', label: 'Yes' },
+          { id: 'opt-no', label: 'No' },
+        ],
+        status: 'open',
+        resultsRevealed: false,
+      };
+
+      const validBinaryVote = recordPollVote(binaryPoll, {}, 'part-1', ['opt-yes']);
+      expect(validBinaryVote.optionIds).toEqual(['opt-yes']);
+
+      expect(() => recordPollVote(binaryPoll, {}, 'part-2', ['opt-yes', 'opt-no'])).toThrow(
+        "Poll type 'binary' requires exactly one selection",
+      );
+    });
+
+    it('supports multiple-choice polls and enforces minimum 1 selection', () => {
+      const multiPoll: PollDefinition = {
+        id: 'poll-multi',
+        sessionId: 'sess-1',
+        slideId: 'slide-2',
+        question: 'Which features do you use?',
+        type: 'multiple-choice',
+        options: [
+          { id: 'opt-1', label: 'Polls' },
+          { id: 'opt-2', label: 'Q&A' },
+          { id: 'opt-3', label: 'Word Clouds' },
+        ],
+        status: 'open',
+        resultsRevealed: false,
+      };
+
+      const vote = recordPollVote(multiPoll, {}, 'part-1', ['opt-1', 'opt-3']);
+      expect(vote.optionIds).toEqual(['opt-1', 'opt-3']);
+
+      expect(() => recordPollVote(multiPoll, {}, 'part-2', [])).toThrow(
+        'Must select at least one option',
+      );
+    });
+
+    it('rejects invalid option IDs', () => {
+      expect(() => recordPollVote(poll, {}, 'part-1', ['opt-non-existent'])).toThrow(
+        "Invalid option ID 'opt-non-existent' for poll",
+      );
     });
 
     it('rejects voting when poll is closed or draft', () => {
