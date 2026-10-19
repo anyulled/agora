@@ -515,6 +515,48 @@ export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
         },
       },
     },
+    '/api/v1/sessions/{id}/polls/{pollId}/open': {
+      parameters: [pathParam('id', 'Session identifier'), pathParam('pollId', 'Poll identifier')],
+      post: {
+        tags: ['Interactions'],
+        operationId: 'openPoll',
+        summary: 'Reopen a slide poll (SPEC-010)',
+        security: presenterSec,
+        responses: {
+          '200': jsonRes('Opened poll', ref('PollDefinition')),
+          '403': errRes('Unauthorized presenter'),
+          '404': errRes('Poll not found'),
+        },
+      },
+    },
+    '/api/v1/sessions/{id}/polls/{pollId}/close': {
+      parameters: [pathParam('id', 'Session identifier'), pathParam('pollId', 'Poll identifier')],
+      post: {
+        tags: ['Interactions'],
+        operationId: 'closePoll',
+        summary: 'Close a slide poll (SPEC-010)',
+        security: presenterSec,
+        responses: {
+          '200': jsonRes('Closed poll', ref('PollDefinition')),
+          '403': errRes('Unauthorized presenter'),
+          '404': errRes('Poll not found'),
+        },
+      },
+    },
+    '/api/v1/sessions/{id}/polls/{pollId}/reveal': {
+      parameters: [pathParam('id', 'Session identifier'), pathParam('pollId', 'Poll identifier')],
+      post: {
+        tags: ['Interactions'],
+        operationId: 'revealPollResults',
+        summary: 'Reveal poll results to audience and projector (SPEC-010)',
+        security: presenterSec,
+        responses: {
+          '200': jsonRes('Revealed poll results', ref('PollResultsSummary')),
+          '403': errRes('Unauthorized presenter'),
+          '404': errRes('Poll not found'),
+        },
+      },
+    },
     '/api/v1/sessions/{id}/wordclouds': {
       parameters: [pathParam('id', 'Session identifier')],
       post: {

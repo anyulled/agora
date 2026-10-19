@@ -3,6 +3,9 @@ import {
   type AssetManifest,
   type AudienceQuestion,
   type NavigationSuggestion,
+  type PollDefinition,
+  type PollOption,
+  type PollResultsSummary,
   type Presentation,
   type PresentationSession,
   type QuestionStatus,
@@ -44,6 +47,9 @@ export interface PresenterViewState {
   pdfDownloadUnlocked: boolean;
   activeSuggestion: NavigationSuggestion | null;
   qaState: QaSlideControllerState;
+  activePoll: PollDefinition | null;
+  activePollResults: PollResultsSummary | null;
+  pollsForCurrentSlide: PollDefinition[];
   hasAdminControls: false;
 }
 
@@ -53,6 +59,8 @@ export interface ProjectorViewState {
   currentSlide: SlideMetadata | null;
   isQaSlide: boolean;
   qaQuestions: AudienceQuestion[];
+  projectedPoll: PollDefinition | null;
+  projectedPollResults: PollResultsSummary | null;
   isSuggestionVisibleOnProjection: false;
   hasPresenterOnlyControls: false;
 }
@@ -74,6 +82,10 @@ export class PresenterAppController {
   private qaViewMode: QaViewMode = 'list';
   private selectedQuestionId: string | null = null;
   private qaSortBy: 'votes' | 'time' = 'votes';
+
+  // Contextual polls (SPEC-010)
+  private polls: PollDefinition[] = [];
+  private pollResults = new Map<string, PollResultsSummary>();
 
   private listeners = new Set<(state: PresenterViewState) => void>();
 
@@ -381,7 +393,178 @@ export class PresenterAppController {
           this.receiveReaction(p.slideId, p.reaction);
         }
       }
+    } else if (event.type === 'poll.opened') {
+      const p = event.payload as
+        | (PollDefinition & { pollId?: string })
+        | (PollResultsSummary & { options?: PollDefinition['options'] });
+      const candidateId = 'id' in p ? p.id : undefined;
+      const candidatePollId = 'pollId' in p ? p.pollId : undefined;
+      const id = candidateId ?? candidatePollId;
+      if (id) {
+        const existing = this.polls.find((item) => item.id === id);
+        if (existing) {
+          existing.status = 'open';
+          if ('options' in p && Array.isArray(p.options)) existing.options = p.options;
+          if ('question' in p && typeof p.question === 'string') existing.question = p.question;
+        } else if ('slideId' in p && 'question' in p && 'options' in p) {
+          const pollOptions = Array.isArray(p.options) ? (p.options as PollOption[]) : [];
+          this.polls.push({
+            id,
+            sessionId: this.session.id,
+            slideId: String(p.slideId),
+            question: String(p.question || ''),
+            type: p.type || 'single',
+            options: pollOptions,
+            status: 'open',
+            resultsRevealed: false,
+          });
+        }
+        this.notifyListeners();
+      }
+    } else if (event.type === 'poll.closed') {
+      const p = event.payload as { pollId?: string; id?: string };
+      const id = p?.pollId ?? p?.id;
+      if (id) {
+        const existing = this.polls.find((item) => item.id === id);
+        if (existing) {
+          existing.status = 'closed';
+          this.notifyListeners();
+        }
+      }
+    } else if (event.type === 'poll.voted') {
+      const p = event.payload as {
+        pollId?: string;
+        selectedOptionIds?: string[];
+        totalResponses?: number;
+      };
+      if (p?.pollId) {
+        let summary = this.pollResults.get(p.pollId);
+        if (!summary) {
+          const poll = this.polls.find((item) => item.id === p.pollId);
+          summary = {
+            pollId: p.pollId,
+            slideId: poll?.slideId ?? '',
+            status: poll?.status ?? 'open',
+            resultsRevealed: poll?.resultsRevealed ?? false,
+            totalResponses: p.totalResponses ?? 0,
+            countsByOptionId: poll ? Object.fromEntries(poll.options.map((o) => [o.id, 0])) : {},
+          };
+          this.pollResults.set(p.pollId, summary);
+        }
+        if (p.totalResponses !== undefined) {
+          summary.totalResponses = p.totalResponses;
+        }
+        if (p.selectedOptionIds) {
+          for (const optId of p.selectedOptionIds) {
+            summary.countsByOptionId[optId] = (summary.countsByOptionId[optId] ?? 0) + 1;
+          }
+        }
+        this.notifyListeners();
+      }
+    } else if (event.type === 'poll.results') {
+      const p = event.payload as {
+        pollId?: string;
+        results?: Record<string, number>;
+        totalVotes?: number;
+        resultsRevealed?: boolean;
+        summary?: PollResultsSummary;
+      };
+      const summary =
+        p.summary ??
+        (p.pollId
+          ? {
+              pollId: p.pollId,
+              slideId: this.polls.find((item) => item.id === p.pollId)?.slideId ?? '',
+              status: this.polls.find((item) => item.id === p.pollId)?.status ?? 'closed',
+              resultsRevealed: true,
+              totalResponses: p.totalVotes ?? 0,
+              countsByOptionId: p.results ?? {},
+            }
+          : null);
+      if (summary) {
+        this.pollResults.set(summary.pollId, summary);
+        const target = this.polls.find((item) => item.id === summary.pollId);
+        if (target) {
+          target.resultsRevealed = true;
+        }
+        this.notifyListeners();
+      }
     }
+  }
+
+  // SPEC-010: Contextual polls management
+  setPolls(polls: PollDefinition[]): void {
+    this.polls = polls.map((p) => ({ ...p, options: p.options.map((o) => ({ ...o })) }));
+    this.notifyListeners();
+  }
+
+  addPoll(poll: PollDefinition): void {
+    const existingIndex = this.polls.findIndex((p) => p.id === poll.id);
+    if (existingIndex >= 0) {
+      this.polls[existingIndex] = { ...poll, options: poll.options.map((o) => ({ ...o })) };
+    } else {
+      this.polls.push({ ...poll, options: poll.options.map((o) => ({ ...o })) });
+    }
+    this.notifyListeners();
+  }
+
+  getPolls(): PollDefinition[] {
+    return this.polls.map((p) => ({ ...p, options: p.options.map((o) => ({ ...o })) }));
+  }
+
+  getPollsForSlide(slideId: string): PollDefinition[] {
+    return this.polls.filter((p) => p.slideId === slideId);
+  }
+
+  getActivePollForSlide(slideId?: string): PollDefinition | null {
+    const targetSlideId = slideId ?? this.getCurrentSlide()?.id;
+    if (!targetSlideId) return null;
+    return this.polls.find((p) => p.slideId === targetSlideId && p.status === 'open') ?? null;
+  }
+
+  getPollResults(pollId: string): PollResultsSummary | null {
+    return this.pollResults.get(pollId) ?? null;
+  }
+
+  openPoll(pollId: string): boolean {
+    const poll = this.polls.find((p) => p.id === pollId);
+    if (!poll) return false;
+    poll.status = 'open';
+    this.notifyListeners();
+    return true;
+  }
+
+  closePoll(pollId: string): boolean {
+    const poll = this.polls.find((p) => p.id === pollId);
+    if (!poll) return false;
+    poll.status = 'closed';
+    this.notifyListeners();
+    return true;
+  }
+
+  revealPollResults(pollId: string): boolean {
+    const poll = this.polls.find((p) => p.id === pollId);
+    if (!poll) return false;
+    poll.resultsRevealed = true;
+    let summary = this.pollResults.get(pollId);
+    if (!summary) {
+      summary = {
+        pollId,
+        slideId: poll.slideId,
+        status: poll.status,
+        resultsRevealed: true,
+        totalResponses: 0,
+        countsByOptionId: Object.fromEntries(poll.options.map((o) => [o.id, 0])),
+        question: poll.question,
+        type: poll.type,
+        options: poll.options,
+      };
+      this.pollResults.set(pollId, summary);
+    } else {
+      summary.resultsRevealed = true;
+    }
+    this.notifyListeners();
+    return true;
   }
 
   selectQuestion(questionId: string): boolean {
@@ -426,7 +609,10 @@ export class PresenterAppController {
       return q;
     }
 
-    const cleanEndpoint = endpoint.replace(/\/+$/, '');
+    let cleanEndpoint = endpoint;
+    while (cleanEndpoint.endsWith('/')) {
+      cleanEndpoint = cleanEndpoint.slice(0, -1);
+    }
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
@@ -502,6 +688,11 @@ export class PresenterAppController {
 
   getViewState(): PresenterViewState {
     const currentSlide = this.getCurrentSlide();
+    const slideId = currentSlide?.id ?? '';
+    const pollsForCurrentSlide = this.getPollsForSlide(slideId);
+    const activePoll = this.getActivePollForSlide(slideId) ?? pollsForCurrentSlide[0] ?? null;
+    const activePollResults = activePoll ? (this.pollResults.get(activePoll.id) ?? null) : null;
+
     return {
       sessionId: this.session.id,
       presentationId: this.presentation.id,
@@ -522,18 +713,30 @@ export class PresenterAppController {
       pdfDownloadUnlocked: this.session.pdfDownloadUnlocked,
       activeSuggestion: this.getActiveSuggestion(),
       qaState: this.getQaState(),
+      activePoll,
+      activePollResults,
+      pollsForCurrentSlide,
       hasAdminControls: false, // SPEC-012: Invariant
     };
   }
 
   getProjectorViewState(): ProjectorViewState {
     const currentSlide = this.getCurrentSlide();
+    const slideId = currentSlide?.id ?? '';
+    const pollsForCurrentSlide = this.getPollsForSlide(slideId);
+    const revealedPoll = pollsForCurrentSlide.find((p) => p.resultsRevealed) ?? null;
+    const projectedPollResults = revealedPoll
+      ? (this.pollResults.get(revealedPoll.id) ?? null)
+      : null;
+
     return {
       sessionId: this.session.id,
       presentationTitle: this.presentation.title,
       currentSlide,
       isQaSlide: Boolean(currentSlide?.isQaSlide),
       qaQuestions: this.getQuestions(),
+      projectedPoll: revealedPoll,
+      projectedPollResults,
       isSuggestionVisibleOnProjection: false, // SPEC-012: Invariant
       hasPresenterOnlyControls: false, // SPEC-012: Invariant
     };
@@ -595,6 +798,41 @@ export function renderPresenterViewHtml(state: PresenterViewState): string {
     }
   }
 
+  // Contextual Polls widget (SPEC-010)
+  let pollControlHtml = '';
+  if (state.activePoll) {
+    const p = state.activePoll;
+    const summary = state.activePollResults;
+    const totalVotes = summary?.totalResponses ?? 0;
+    const optionsHtml = p.options
+      .map((opt) => {
+        const count = summary?.countsByOptionId[opt.id] ?? 0;
+        const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
+        return `
+          <li class="presenter-poll-option">
+            <span>${opt.label || opt.text || opt.id}</span>
+            <span class="poll-opt-votes">${count} votes (${pct}%)</span>
+          </li>`;
+      })
+      .join('');
+
+    pollControlHtml = `
+      <section class="card poll-control-panel" aria-label="Slide Poll Controls">
+        <header class="poll-header">
+          <h4>Poll: ${p.question}</h4>
+          <span class="poll-badge status-${p.status}">${p.status.toUpperCase()}</span>
+        </header>
+        <ul class="presenter-poll-options">
+          ${optionsHtml}
+        </ul>
+        <div class="poll-actions">
+          ${p.status !== 'open' ? `<button class="btn-poll-open" data-action="open-poll" data-id="${p.id}">Open Poll</button>` : ''}
+          ${p.status === 'open' ? `<button class="btn-poll-close" data-action="close-poll" data-id="${p.id}">Close Poll</button>` : ''}
+          ${!p.resultsRevealed ? `<button class="btn-poll-reveal" data-action="reveal-poll" data-id="${p.id}">Reveal on Projector</button>` : '<span class="revealed-badge">Revealed on Projector</span>'}
+        </div>
+      </section>`;
+  }
+
   const sessionJoinBanner =
     state.audienceUrl || state.qrCodeDataUrl
       ? `<div class="session-join-banner">
@@ -611,6 +849,7 @@ export function renderPresenterViewHtml(state: PresenterViewState): string {
           <h2 class="slide-title-display">${state.currentSlide?.title ?? 'No slide'}</h2>
           <span class="coordinates-indicator">Coordinates: [${state.horizontalIndex}, ${state.verticalIndex}]</span>
           ${qaViewHtml}
+          ${pollControlHtml}
         </section>
         <aside class="presenter-sidebar">
           ${sessionJoinBanner}
@@ -670,6 +909,35 @@ export function renderProjectorViewHtml(state: ProjectorViewState): string {
         <ul class="projector-questions-list">
           ${listHtml || '<li>No questions submitted yet.</li>'}
         </ul>
+      </div>`;
+  } else if (state.projectedPollResults) {
+    const res = state.projectedPollResults;
+    const total = Math.max(1, res.totalResponses);
+    const optionsHtml = Object.entries(res.countsByOptionId)
+      .map(([optId, count]) => {
+        const pct = res.totalResponses > 0 ? Math.round((count / total) * 100) : 0;
+        return `
+        <li class="projector-poll-option">
+          <div class="poll-opt-header">
+            <span class="poll-opt-label">${optId}</span>
+            <span class="poll-opt-stat">${count} votes (${pct}%)</span>
+          </div>
+          <div class="poll-progress-track">
+            <div class="poll-progress-fill" style="width: ${pct}%"></div>
+          </div>
+        </li>`;
+      })
+      .join('');
+
+    content = `
+      <div class="projector-poll-slide" data-component="audience-poll">
+        <h2>${state.projectedPoll?.question ?? 'Live Poll Results'}</h2>
+        <ul class="projector-poll-options">
+          ${optionsHtml}
+        </ul>
+        <footer class="projector-poll-footer">
+          <span>Total Responses: ${res.totalResponses}</span>
+        </footer>
       </div>`;
   } else {
     content = `

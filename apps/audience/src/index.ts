@@ -4,7 +4,10 @@ import {
   type AudienceQuestion,
   type AudienceSafeSessionView,
   type ParticipantIdentity,
+  type PollOption,
   type PollResultsSummary,
+  type PollStatus,
+  type PollType,
   type Reaction,
   type ReactionCounts,
   type RealtimeEvent,
@@ -58,7 +61,10 @@ export function buildAudienceWebSocketUrl(
   sessionId: string,
   participantToken?: string,
 ): string {
-  const trimmed = endpoint.replace(/\/+$/, '');
+  let trimmed = endpoint;
+  while (trimmed.endsWith('/')) {
+    trimmed = trimmed.slice(0, -1);
+  }
   const wsBase = trimmed.replace(/^http:\/\//i, 'ws://').replace(/^https:\/\//i, 'wss://');
   const baseUrl = `${wsBase}/api/v1/sessions/${encodeURIComponent(sessionId)}/ws`;
   if (participantToken) {
@@ -377,16 +383,128 @@ export class AudienceAppController {
         break;
       }
 
-      case 'poll.opened':
-      case 'poll.closed':
-      case 'poll.results': {
-        const poll = event.payload as PollResultsSummary;
-        if (poll?.pollId) {
-          const idx = this.polls.findIndex((p) => p.pollId === poll.pollId);
+      case 'poll.opened': {
+        const p = event.payload as {
+          pollId?: string;
+          id?: string;
+          slideId?: string;
+          question?: string;
+          options?: Array<{ id: string; label?: string; text?: string }>;
+          type?: string;
+          countsByOptionId?: Record<string, number>;
+        };
+        const pollId = p?.pollId ?? p?.id;
+        if (pollId) {
+          const counts: Record<string, number> = {};
+          if (p.options && Array.isArray(p.options)) {
+            for (const opt of p.options) {
+              counts[opt.id] = 0;
+            }
+          }
+          const pollEntry: PollResultsSummary = {
+            pollId,
+            slideId: p.slideId ?? '',
+            status: 'open',
+            resultsRevealed: false,
+            totalResponses: 0,
+            countsByOptionId: p.countsByOptionId ?? counts,
+            question: p.question,
+            type: p.type as PollType,
+            options: p.options as PollOption[],
+          };
+          const idx = this.polls.findIndex((item) => item.pollId === pollId);
           if (idx >= 0) {
-            this.polls[idx] = { ...poll };
+            this.polls[idx] = { ...this.polls[idx], ...pollEntry };
           } else {
-            this.polls.push({ ...poll });
+            this.polls.push(pollEntry);
+          }
+          this.notifyListeners();
+        }
+        break;
+      }
+
+      case 'poll.closed': {
+        const p = event.payload as { pollId?: string; id?: string };
+        const pollId = p?.pollId ?? p?.id;
+        if (pollId) {
+          const poll = this.polls.find((item) => item.pollId === pollId);
+          if (poll) {
+            poll.status = 'closed';
+            this.notifyListeners();
+          }
+        }
+        break;
+      }
+
+      case 'poll.voted': {
+        const p = event.payload as {
+          pollId?: string;
+          selectedOptionIds?: string[];
+          totalResponses?: number;
+        };
+        if (p?.pollId) {
+          const poll = this.polls.find((item) => item.pollId === p.pollId);
+          if (poll) {
+            if (p.totalResponses !== undefined) {
+              poll.totalResponses = p.totalResponses;
+            }
+            if (p.selectedOptionIds && Array.isArray(p.selectedOptionIds)) {
+              for (const optId of p.selectedOptionIds) {
+                poll.countsByOptionId[optId] = (poll.countsByOptionId[optId] ?? 0) + 1;
+              }
+            }
+            this.notifyListeners();
+          }
+        }
+        break;
+      }
+
+      case 'poll.results': {
+        const p = event.payload as {
+          pollId?: string;
+          id?: string;
+          results?: Record<string, number>;
+          totalVotes?: number;
+          totalResponses?: number;
+          resultsRevealed?: boolean;
+          summary?: PollResultsSummary;
+          slideId?: string;
+          status?: PollStatus;
+          countsByOptionId?: Record<string, number>;
+          question?: string;
+          type?: PollType;
+          options?: PollOption[];
+        };
+        const pollId = p?.pollId ?? p?.id ?? p?.summary?.pollId;
+        if (pollId) {
+          const s = p.summary;
+          const idx = this.polls.findIndex((item) => item.pollId === pollId);
+          const totalResponses = p.totalVotes ?? s?.totalResponses ?? p.totalResponses ?? 0;
+          const countsByOptionId = p.results ?? s?.countsByOptionId ?? p.countsByOptionId ?? {};
+          const status: PollStatus = s?.status ?? p.status ?? 'closed';
+          const slideId =
+            s?.slideId ?? p.slideId ?? (idx >= 0 ? (this.polls[idx]?.slideId ?? '') : '');
+          const question =
+            s?.question ?? p.question ?? (idx >= 0 ? this.polls[idx]?.question : undefined);
+          const type = s?.type ?? p.type ?? (idx >= 0 ? this.polls[idx]?.type : undefined);
+          const options =
+            s?.options ?? p.options ?? (idx >= 0 ? this.polls[idx]?.options : undefined);
+
+          const updated: PollResultsSummary = {
+            pollId,
+            slideId,
+            status,
+            resultsRevealed: true,
+            totalResponses,
+            countsByOptionId,
+            question,
+            type,
+            options,
+          };
+          if (idx >= 0) {
+            this.polls[idx] = { ...this.polls[idx], ...updated };
+          } else {
+            this.polls.push(updated);
           }
           this.notifyListeners();
         }
@@ -429,7 +547,10 @@ export class AudienceAppController {
     if (!fetcher) return;
 
     try {
-      const cleanEndpoint = endpoint.replace(/\/+$/, '');
+      let cleanEndpoint = endpoint;
+      while (cleanEndpoint.endsWith('/')) {
+        cleanEndpoint = cleanEndpoint.slice(0, -1);
+      }
       const res = await fetcher(
         `${cleanEndpoint}/api/v1/sessions/${encodeURIComponent(this.sessionId)}`,
       );
@@ -697,7 +818,10 @@ export class AudienceAppController {
       return this.submitQuestion(content, displayName);
     }
 
-    const cleanEndpoint = endpoint.replace(/\/+$/, '');
+    let cleanEndpoint = endpoint;
+    while (cleanEndpoint.endsWith('/')) {
+      cleanEndpoint = cleanEndpoint.slice(0, -1);
+    }
     const canonicalSlideId = activeSlide.id.split(/[#/:]/)[0]!.trim();
     const resolvedName = displayName?.trim() || this.participant.displayName;
 
@@ -781,7 +905,10 @@ export class AudienceAppController {
       };
     }
 
-    const cleanEndpoint = endpoint.replace(/\/+$/, '');
+    let cleanEndpoint = endpoint;
+    while (cleanEndpoint.endsWith('/')) {
+      cleanEndpoint = cleanEndpoint.slice(0, -1);
+    }
     const res = await fetcher(
       `${cleanEndpoint}/api/v1/sessions/${encodeURIComponent(this.sessionId)}/questions/${encodeURIComponent(questionId)}/upvote`,
       {
@@ -887,7 +1014,10 @@ export class AudienceAppController {
       return this.getReactionsForActiveSlide();
     }
 
-    const cleanEndpoint = endpoint.replace(/\/+$/, '');
+    let cleanEndpoint = endpoint;
+    while (cleanEndpoint.endsWith('/')) {
+      cleanEndpoint = cleanEndpoint.slice(0, -1);
+    }
     const res = await fetcher(
       `${cleanEndpoint}/api/v1/sessions/${encodeURIComponent(this.sessionId)}/reactions`,
       {
@@ -950,7 +1080,11 @@ export class AudienceAppController {
   getActivePollForCurrentSlide(): PollResultsSummary | null {
     const activeId = this.getActiveSlideId();
     if (!activeId) return null;
-    return this.polls.find((p) => p.slideId === activeId && p.status === 'open') ?? null;
+    return (
+      this.polls.find(
+        (p) => p.slideId === activeId && (p.status === 'open' || p.resultsRevealed),
+      ) ?? null
+    );
   }
 
   // SPEC-021: Word cloud submissions
@@ -1108,24 +1242,42 @@ export function renderAudienceHtml(vm: AudienceViewModel): string {
   // Active Poll widget
   let pollWidget = '';
   if (vm.activePoll) {
-    const optionsHtml = Object.entries(vm.activePoll.countsByOptionId)
-      .map(
-        ([optId, count]) => `
+    const poll = vm.activePoll;
+    const isRevealed = Boolean(poll.resultsRevealed);
+    const totalVotes = Math.max(1, poll.totalResponses);
+
+    const optionsHtml = Object.entries(poll.countsByOptionId)
+      .map(([optId, count]) => {
+        const opt = poll.options?.find((o) => o.id === optId);
+        const labelText = opt?.label || opt?.text || `Option: ${optId}`;
+        const pct = poll.totalResponses > 0 ? Math.round((count / totalVotes) * 100) : 0;
+        const resultBar = isRevealed
+          ? `<div class="poll-bar-track"><div class="poll-bar-fill" style="width: ${pct}%"></div></div>`
+          : '';
+
+        return `
         <li class="poll-option-item">
-          <button class="btn-poll-option" data-action="vote-poll" data-poll-id="${vm.activePoll?.pollId}" data-option-id="${optId}">
-            <span>Option: ${optId}</span>
-            <span class="poll-vote-count">(${count} votes)</span>
+          <button class="btn-poll-option" data-action="vote-poll" data-poll-id="${poll.pollId}" data-option-id="${optId}">
+            <span>${labelText}</span>
+            <span class="poll-vote-count">(${count} votes${isRevealed ? `, ${pct}%` : ''})</span>
           </button>
-        </li>`,
-      )
+          ${resultBar}
+        </li>`;
+      })
       .join('');
+
+    const heading = poll.question ? `Live Poll: ${poll.question}` : 'Live Poll';
+    const footerText = isRevealed
+      ? `Results revealed &bull; Total responses: ${poll.totalResponses}`
+      : 'Select an option to cast your vote';
 
     pollWidget = `
       <section class="card poll-widget" aria-label="Active Poll">
-        <h4>Live Poll</h4>
+        <h4>${heading}</h4>
         <ul class="poll-options-list">
           ${optionsHtml}
         </ul>
+        <p class="poll-widget-footer">${footerText}</p>
       </section>`;
   }
 

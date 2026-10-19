@@ -687,7 +687,13 @@ export class AgoraPlatformService {
 
     let displayName: string | undefined;
     if (rawDisplayName) {
-      const stripped = rawDisplayName.replace(/<[^>]*>/g, '').trim();
+      let prev = '';
+      let curr = rawDisplayName;
+      while (curr !== prev) {
+        prev = curr;
+        curr = curr.replace(/<[^>]*>/g, '');
+      }
+      const stripped = curr.trim();
       if (stripped.length > 0) {
         displayName = stripped.slice(0, 50);
       }
@@ -994,6 +1000,9 @@ export class AgoraPlatformService {
       resultsRevealed: poll.resultsRevealed,
       totalResponses,
       countsByOptionId,
+      question: poll.question,
+      type: poll.type,
+      options: poll.options,
     };
   }
 

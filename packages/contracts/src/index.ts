@@ -3,8 +3,8 @@ export type SessionStatus = 'scheduled' | 'live' | 'completed';
 export type QuestionStatus = 'pending' | 'answered' | 'dismissed';
 export type AudienceMode = 'follow' | 'solo';
 export type Reaction = '👍' | '🤔' | '❤️' | '😴';
-export type PollType = 'single' | 'multiple' | 'binary';
-export type PollStatus = 'draft' | 'open' | 'closed';
+export type PollType = 'single' | 'multiple' | 'binary' | 'single-choice' | 'multiple-choice';
+export type PollStatus = 'draft' | 'open' | 'closed' | 'revealed';
 export type WordCloudStatus = 'draft' | 'open' | 'closed';
 export type ActorRole = 'admin' | 'presenter' | 'attendee';
 
@@ -124,6 +124,7 @@ export interface QuestionUpvotedPayload {
 export interface PollOption {
   id: string;
   label: string;
+  text?: string;
 }
 
 export interface PollDefinition {
@@ -137,6 +138,22 @@ export interface PollDefinition {
   resultsRevealed: boolean;
 }
 
+export interface SlidePoll {
+  id: string;
+  slideId: string;
+  type: PollType;
+  question: string;
+  options: Array<{ id: string; label?: string; text?: string }>;
+  status: PollStatus;
+  sessionId?: string;
+}
+
+export interface PollResponse {
+  pollId: string;
+  participantId: string;
+  selectedOptionIds: string[];
+}
+
 export interface PollResultsSummary {
   pollId: string;
   slideId: string;
@@ -144,6 +161,39 @@ export interface PollResultsSummary {
   resultsRevealed: boolean;
   totalResponses: number;
   countsByOptionId: Record<string, number>;
+  question?: string;
+  type?: PollType;
+  options?: PollOption[];
+}
+
+export interface PollOpenedPayload {
+  pollId: string;
+  slideId: string;
+  question: string;
+  options: PollOption[];
+  type: PollType;
+  status?: PollStatus;
+  resultsRevealed?: boolean;
+}
+
+export interface PollClosedPayload {
+  pollId: string;
+  status?: PollStatus;
+}
+
+export interface PollVotedPayload {
+  pollId: string;
+  selectedOptionIds: string[];
+  participantId?: string;
+  totalResponses?: number;
+}
+
+export interface PollResultsPayload {
+  pollId: string;
+  results: Record<string, number>;
+  totalVotes: number;
+  resultsRevealed?: boolean;
+  summary?: PollResultsSummary;
 }
 
 export interface NavigationRule {

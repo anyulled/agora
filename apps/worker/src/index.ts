@@ -9,6 +9,8 @@ import {
   type PollDefinition,
   type PollOption,
   type PollResultsSummary,
+  type PollStatus,
+  type PollType,
   type Presentation,
   type PresentationBranding,
   type PresentationRevisionStatus,
@@ -67,11 +69,17 @@ export interface AgoraWorkerAppOptions {
 }
 
 export function sanitizeText(input: string): string {
-  return input
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/<[^>]*>/g, '')
-    .replace(/javascript:/gi, '')
-    .trim();
+  let prev = '';
+  let curr = input;
+  while (curr !== prev) {
+    prev = curr;
+    curr = curr
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, '')
+      .replace(/<[^>]*>/g, '')
+      .replace(/(?:javascript|vbscript|data):/gi, '');
+  }
+  return curr.trim();
 }
 
 export function normalizeWordCloudTerm(input: string): string {
@@ -98,7 +106,7 @@ export class InMemoryAgoraStore {
   public questionUpvotes = new Map<string, Set<string>>(); // questionId -> Set<participantId>
   public reactions = new Map<string, Map<string, ReactionCounts>>(); // sessionId -> slideId -> counts
   public polls = new Map<string, PollDefinition[]>(); // sessionId -> polls
-  public pollVotes = new Map<string, Map<string, string>>(); // pollId -> participantId -> optionId
+  public pollVotes = new Map<string, Map<string, string[]>>(); // pollId -> participantId -> selectedOptionIds
   public wordClouds = new Map<string, WordCloudPrompt[]>(); // sessionId -> prompts
   public wordCloudSubmissions = new Map<string, { participantId: string; term: string }[]>(); // promptId -> submissions
   public processedEvents = new Map<string, Set<string>>(); // sessionId -> Set<eventId>
@@ -554,13 +562,18 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
   }
 
   function buildPollResultsSummary(poll: PollDefinition): PollResultsSummary {
-    const votes = store.pollVotes.get(poll.id) || new Map<string, string>();
+    const votes = store.pollVotes.get(poll.id) || new Map<string, string[]>();
     const counts: Record<string, number> = {};
     for (const opt of poll.options) {
       counts[opt.id] = 0;
     }
-    for (const optId of votes.values()) {
-      counts[optId] = (counts[optId] || 0) + 1;
+    for (const optIds of votes.values()) {
+      const ids = Array.isArray(optIds) ? optIds : [optIds];
+      for (const optId of ids) {
+        if (counts[optId] !== undefined) {
+          counts[optId] = (counts[optId] || 0) + 1;
+        }
+      }
     }
     return {
       pollId: poll.id,
@@ -569,6 +582,9 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       resultsRevealed: poll.resultsRevealed,
       totalResponses: votes.size,
       countsByOptionId: counts,
+      question: poll.question,
+      type: poll.type,
+      options: poll.options,
     };
   }
 
@@ -694,6 +710,47 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     );
   }
 
+  function persistPollToDO(env: WorkerEnv | undefined, poll: PollDefinition): void {
+    const doState = asDO(env, poll.sessionId);
+    if (!doState) return;
+
+    doState.storage.sql.exec(
+      `INSERT OR REPLACE INTO polls (id, session_id, slide_id, question, type, options_json, status, results_revealed, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      poll.id,
+      poll.sessionId,
+      poll.slideId,
+      poll.question,
+      poll.type,
+      JSON.stringify(poll.options),
+      poll.status,
+      poll.resultsRevealed ? 1 : 0,
+      new Date().toISOString(),
+    );
+  }
+
+  function persistPollVoteToDO(
+    env: WorkerEnv | undefined,
+    sessionId: string,
+    pollId: string,
+    participantId: string,
+    optionIds: string[],
+  ): void {
+    const doState = asDO(env, sessionId);
+    if (!doState) return;
+
+    const optIdStr = optionIds.join(',');
+    doState.storage.sql.exec(
+      `INSERT OR REPLACE INTO poll_votes (poll_id, participant_id, option_id, session_id, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      pollId,
+      participantId,
+      optIdStr,
+      sessionId,
+      new Date().toISOString(),
+    );
+  }
+
   async function hydrateSessionFromDO(
     env: WorkerEnv | undefined,
     sessionId: string,
@@ -780,6 +837,47 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
           targetQ.upvotedByParticipantIds.push(pId);
         }
       }
+    }
+
+    // Hydrate polls from Durable Object embedded SQLite (SPEC-010)
+    const pollRows = doState.storage.sql
+      .exec<Record<string, unknown>>(
+        'SELECT * FROM polls WHERE session_id = ? ORDER BY created_at ASC',
+        sessionId,
+      )
+      .toArray();
+
+    const loadedPolls: PollDefinition[] = pollRows.map((pr) => ({
+      id: String(pr.id),
+      sessionId: String(pr.session_id),
+      slideId: String(pr.slide_id),
+      question: String(pr.question),
+      type: (pr.type as PollType) || 'single',
+      options: JSON.parse(String(pr.options_json || '[]')) as PollOption[],
+      status: (pr.status as PollStatus) || 'draft',
+      resultsRevealed: Boolean(pr.results_revealed),
+    }));
+    store.polls.set(sessionId, loadedPolls);
+
+    // Hydrate poll votes
+    const voteRows = doState.storage.sql
+      .exec<Record<string, unknown>>(
+        'SELECT poll_id, participant_id, option_id FROM poll_votes WHERE session_id = ?',
+        sessionId,
+      )
+      .toArray();
+
+    for (const vr of voteRows) {
+      const pId = String(vr.poll_id);
+      const partId = String(vr.participant_id);
+      const rawOptId = String(vr.option_id);
+      const optIds = rawOptId.includes(',') ? rawOptId.split(',') : [rawOptId];
+      let voteMap = store.pollVotes.get(pId);
+      if (!voteMap) {
+        voteMap = new Map();
+        store.pollVotes.set(pId, voteMap);
+      }
+      voteMap.set(partId, optIds);
     }
 
     const status = (row.status as PresentationSession['status']) || 'live';
@@ -1939,7 +2037,23 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       return jsonResponse({ ok: true, summary: currentCounts });
     }
 
-    // 17. POST /api/v1/sessions/:id/polls (Presenter creates poll)
+    // 17. GET /api/v1/sessions/:id/polls (List polls)
+    const pollListMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)\/polls$/);
+    if (method === 'GET' && pollListMatch) {
+      const sessionId = pollListMatch[1]!;
+      const session = await hydrateSessionFromDO(env, sessionId);
+      if (!session) {
+        return errorResponse('Session not found', 404);
+      }
+      const isPresenter = authorizePresenter(request, sessionId);
+      const pollList = store.polls.get(sessionId) || [];
+      const accessiblePolls = isPresenter
+        ? pollList
+        : pollList.filter((p) => isSlideRevealed(session, p.slideId));
+      return jsonResponse(accessiblePolls);
+    }
+
+    // 17b. POST /api/v1/sessions/:id/polls (Presenter creates poll)
     const pollCreateMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)\/polls$/);
     if (method === 'POST' && pollCreateMatch) {
       const sessionId = pollCreateMatch[1]!;
@@ -1950,13 +2064,20 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       const body = (await request.json().catch(() => ({}))) as {
         slideId?: string;
         question?: string;
-        type?: 'single' | 'multiple' | 'binary';
-        options?: PollOption[];
+        type?: PollType;
+        options?: Array<{ id: string; label?: string; text?: string }>;
+        status?: PollStatus;
       };
 
       if (!body.slideId || !body.question || !body.options || body.options.length === 0) {
         return errorResponse('slideId, question, and options are required', 400);
       }
+
+      const normalizedOptions: PollOption[] = body.options.map((opt) => ({
+        id: opt.id,
+        label: opt.label ?? opt.text ?? opt.id,
+        text: opt.text ?? opt.label,
+      }));
 
       const poll: PollDefinition = {
         id: generateSecureId('poll'),
@@ -1964,8 +2085,8 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         slideId: body.slideId,
         question: sanitizeText(body.question),
         type: body.type || 'single',
-        options: body.options,
-        status: 'open',
+        options: normalizedOptions,
+        status: body.status || 'open',
         resultsRevealed: false,
       };
 
@@ -1973,9 +2094,108 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       pollList.push(poll);
       store.polls.set(sessionId, pollList);
       store.pollVotes.set(poll.id, new Map());
+      persistPollToDO(env, poll);
 
-      broadcastRealtimeEvent(sessionId, 'poll.opened', poll);
+      if (poll.status === 'open') {
+        broadcastRealtimeEvent(sessionId, 'poll.opened', {
+          pollId: poll.id,
+          slideId: poll.slideId,
+          question: poll.question,
+          options: poll.options,
+          type: poll.type,
+          status: poll.status,
+          resultsRevealed: poll.resultsRevealed,
+        });
+      }
+
       return jsonResponse(poll, 201);
+    }
+
+    // 17c. POST /api/v1/sessions/:id/polls/:pollId/open (Presenter opens poll)
+    const pollOpenMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)\/polls\/([^/]+)\/open$/);
+    if (method === 'POST' && pollOpenMatch) {
+      const sessionId = pollOpenMatch[1]!;
+      const pollId = pollOpenMatch[2]!;
+      if (!authorizePresenter(request, sessionId)) {
+        return errorResponse('Unauthorized: Presenter authentication required', 403);
+      }
+
+      const pollList = store.polls.get(sessionId) || [];
+      const poll = pollList.find((p) => p.id === pollId);
+      if (!poll) {
+        return errorResponse('Poll not found', 404);
+      }
+
+      poll.status = 'open';
+      persistPollToDO(env, poll);
+
+      broadcastRealtimeEvent(sessionId, 'poll.opened', {
+        pollId: poll.id,
+        slideId: poll.slideId,
+        question: poll.question,
+        options: poll.options,
+        type: poll.type,
+        status: 'open',
+        resultsRevealed: poll.resultsRevealed,
+      });
+
+      return jsonResponse(poll);
+    }
+
+    // 17d. POST /api/v1/sessions/:id/polls/:pollId/close (Presenter closes poll)
+    const pollCloseMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)\/polls\/([^/]+)\/close$/);
+    if (method === 'POST' && pollCloseMatch) {
+      const sessionId = pollCloseMatch[1]!;
+      const pollId = pollCloseMatch[2]!;
+      if (!authorizePresenter(request, sessionId)) {
+        return errorResponse('Unauthorized: Presenter authentication required', 403);
+      }
+
+      const pollList = store.polls.get(sessionId) || [];
+      const poll = pollList.find((p) => p.id === pollId);
+      if (!poll) {
+        return errorResponse('Poll not found', 404);
+      }
+
+      poll.status = 'closed';
+      persistPollToDO(env, poll);
+
+      broadcastRealtimeEvent(sessionId, 'poll.closed', {
+        pollId: poll.id,
+        status: 'closed',
+      });
+
+      return jsonResponse(poll);
+    }
+
+    // 17e. POST /api/v1/sessions/:id/polls/:pollId/reveal (Presenter reveals poll results to projector/audience)
+    const pollRevealMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)\/polls\/([^/]+)\/reveal$/);
+    if (method === 'POST' && pollRevealMatch) {
+      const sessionId = pollRevealMatch[1]!;
+      const pollId = pollRevealMatch[2]!;
+      if (!authorizePresenter(request, sessionId)) {
+        return errorResponse('Unauthorized: Presenter authentication required', 403);
+      }
+
+      const pollList = store.polls.get(sessionId) || [];
+      const poll = pollList.find((p) => p.id === pollId);
+      if (!poll) {
+        return errorResponse('Poll not found', 404);
+      }
+
+      poll.resultsRevealed = true;
+      persistPollToDO(env, poll);
+
+      const summary = buildPollResultsSummary(poll);
+      broadcastRealtimeEvent(sessionId, 'poll.results', {
+        pollId: poll.id,
+        results: summary.countsByOptionId,
+        totalVotes: summary.totalResponses,
+        resultsRevealed: true,
+        summary,
+      });
+
+      return jsonResponse(summary);
     }
 
     // 18. POST /api/v1/sessions/:id/polls/:pollId/vote (Attendee votes + adaptive navigation suggestion)
@@ -2008,9 +2228,35 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         return errorResponse('Slide has not been revealed yet', 403);
       }
 
-      const body = (await request.json().catch(() => ({}))) as { optionId?: string };
-      if (!body.optionId || !poll.options.some((o: PollOption) => o.id === body.optionId)) {
-        return errorResponse('Valid optionId is required', 400);
+      const body = (await request.json().catch(() => ({}))) as {
+        optionId?: string;
+        selectedOptionId?: string;
+        selectedOptionIds?: string[];
+      };
+
+      const selectedIds: string[] = Array.isArray(body.selectedOptionIds)
+        ? body.selectedOptionIds
+        : body.optionId
+          ? [body.optionId]
+          : body.selectedOptionId
+            ? [body.selectedOptionId]
+            : [];
+
+      if (selectedIds.length === 0) {
+        return errorResponse('Must select at least one option', 400);
+      }
+
+      const isSingleOrBinary =
+        poll.type === 'single' || poll.type === 'single-choice' || poll.type === 'binary';
+      if (isSingleOrBinary && selectedIds.length !== 1) {
+        return errorResponse(`Poll type '${poll.type}' requires exactly one selection`, 400);
+      }
+
+      const validOptionIds = new Set(poll.options.map((o: PollOption) => o.id));
+      for (const optId of selectedIds) {
+        if (!validOptionIds.has(optId)) {
+          return errorResponse('Valid optionId is required', 400);
+        }
       }
 
       let votes = store.pollVotes.get(pollId);
@@ -2019,23 +2265,41 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         store.pollVotes.set(pollId, votes);
       }
 
-      // Single-choice poll uniqueness per participant
+      // Single-choice / binary / participant uniqueness invariant per poll
       if (votes.has(participant.id)) {
         return errorResponse('Participant has already voted in this poll', 409);
       }
 
-      votes.set(participant.id, body.optionId);
+      votes.set(participant.id, selectedIds);
+      persistPollVoteToDO(env, sessionId, pollId, participant.id, selectedIds);
 
       const summary = buildPollResultsSummary(poll);
       const counts = summary.countsByOptionId;
       const totalResponses = summary.totalResponses;
 
-      // Evaluate adaptive navigation rules
+      broadcastRealtimeEvent(sessionId, 'poll.voted', {
+        pollId,
+        selectedOptionIds: selectedIds,
+        participantId: participant.id,
+        totalResponses,
+      });
+
+      if (poll.resultsRevealed) {
+        broadcastRealtimeEvent(sessionId, 'poll.results', {
+          pollId: poll.id,
+          results: summary.countsByOptionId,
+          totalVotes: summary.totalResponses,
+          resultsRevealed: true,
+          summary,
+        });
+      }
+
+      // Evaluate adaptive navigation rules for each selected option
       const rules = store.navigationRules.get(session.presentationId) || [];
       const suggestions: NavigationSuggestion[] = [];
 
       for (const rule of rules) {
-        if (rule.pollId === pollId && rule.optionId === body.optionId) {
+        if (rule.pollId === pollId && selectedIds.includes(rule.optionId)) {
           const voteCount = counts[rule.optionId] || 0;
           const percentage = totalResponses > 0 ? (voteCount / totalResponses) * 100 : 0;
 
@@ -2062,7 +2326,6 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         }
       }
 
-      broadcastRealtimeEvent(sessionId, 'poll.results', summary);
       return jsonResponse({ ok: true, summary, suggestions });
     }
 
