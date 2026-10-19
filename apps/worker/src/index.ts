@@ -15,6 +15,7 @@ import {
   type PresentationSession,
   type Reaction,
   type ReactionCounts,
+  type ReactionSummaryPayload,
   type RealtimeEvent,
   type RealtimeEventType,
   type SlideMetadata,
@@ -95,12 +96,32 @@ export class InMemoryAgoraStore {
   public processedEvents = new Map<string, Set<string>>(); // sessionId -> Set<eventId>
 }
 
+class RateLimiter {
+  private records = new Map<string, number[]>();
+
+  public check(key: string, limit: number, windowMs: number): boolean {
+    const now = Date.now();
+    const timestamps = (this.records.get(key) || []).filter((t) => now - t < windowMs);
+    if (timestamps.length >= limit) {
+      this.records.set(key, timestamps);
+      return false;
+    }
+    timestamps.push(now);
+    this.records.set(key, timestamps);
+    return true;
+  }
+}
+
 export class SessionCoordinatorDO {
   private sockets = new Set<WebSocket>();
   private socketTokens = new Map<WebSocket, string | null>();
   private store: InMemoryAgoraStore;
   private sessionId: string;
   private allowedOrigins: string[];
+  private reactionBatchTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingReactionSlides = new Set<string>();
+  private reactionBatchIntervalMs = 500;
+  private reactionRateLimiter = new RateLimiter();
 
   constructor(sessionId: string, store: InMemoryAgoraStore, allowedOrigins: string[] = ['*']) {
     this.sessionId = sessionId;
@@ -247,7 +268,148 @@ export class SessionCoordinatorDO {
       return true;
     }
 
+    if (parsed.type === 'reaction.added') {
+      const candidateToken =
+        overrideToken ??
+        (typeof parsed.token === 'string' ? parsed.token : null) ??
+        this.socketTokens.get(ws) ??
+        null;
+
+      const session = this.store.sessions.get(this.sessionId);
+      if (!session || session.status !== 'live') {
+        return false;
+      }
+
+      const participantKey = candidateToken ?? 'anonymous';
+      if (!this.reactionRateLimiter.check(`react:${participantKey}`, 10, 1000)) {
+        const errorEvent: RealtimeEvent<{ code: string; message: string }> = {
+          id: `evt-err-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          type: 'error',
+          sessionId: this.sessionId,
+          timestamp: new Date().toISOString(),
+          payload: {
+            code: 'RATE_LIMIT_EXCEEDED',
+            message: 'Reaction rate limit exceeded. Please slow down.',
+          },
+        };
+        try {
+          if (ws.readyState === undefined || ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(errorEvent));
+          }
+        } catch {
+          // Ignore
+        }
+        return false;
+      }
+
+      const payload = parsed.payload ?? {};
+      const slideId = typeof payload.slideId === 'string' ? payload.slideId.trim() : '';
+      const reaction = payload.reaction as Reaction;
+
+      if (!slideId || !reaction || !ALLOWED_REACTIONS.includes(reaction)) {
+        return false;
+      }
+
+      if (!session.revealedSlideIds.includes(slideId)) {
+        const errorEvent: RealtimeEvent<{ code: string; message: string }> = {
+          id: `evt-err-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          type: 'error',
+          sessionId: this.sessionId,
+          timestamp: new Date().toISOString(),
+          payload: {
+            code: 'SLIDE_NOT_REVEALED',
+            message: 'Cannot react to unrevealed slide',
+          },
+        };
+        try {
+          if (ws.readyState === undefined || ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(errorEvent));
+          }
+        } catch {
+          // Ignore
+        }
+        return false;
+      }
+
+      this.recordReaction(slideId, reaction);
+      return true;
+    }
+
     return false;
+  }
+
+  public recordReaction(slideId: string, reaction: Reaction): ReactionCounts {
+    let sessionReactions = this.store.reactions.get(this.sessionId);
+    if (!sessionReactions) {
+      sessionReactions = new Map();
+      this.store.reactions.set(this.sessionId, sessionReactions);
+    }
+
+    const currentCounts: ReactionCounts = sessionReactions.get(slideId) || {
+      '👍': 0,
+      '🤔': 0,
+      '❤️': 0,
+      '😴': 0,
+    };
+
+    currentCounts[reaction] = (currentCounts[reaction] ?? 0) + 1;
+    sessionReactions.set(slideId, currentCounts);
+
+    this.pendingReactionSlides.add(slideId);
+
+    if (!this.reactionBatchTimer) {
+      this.reactionBatchTimer = setTimeout(() => {
+        this.flushReactionSummaries();
+      }, this.reactionBatchIntervalMs);
+    }
+
+    return currentCounts;
+  }
+
+  public flushReactionSummaries(): void {
+    if (this.reactionBatchTimer) {
+      clearTimeout(this.reactionBatchTimer);
+      this.reactionBatchTimer = null;
+    }
+
+    if (this.pendingReactionSlides.size === 0) return;
+
+    const sessionReactions = this.store.reactions.get(this.sessionId);
+    for (const slideId of this.pendingReactionSlides) {
+      const counts = sessionReactions?.get(slideId) || {
+        '👍': 0,
+        '🤔': 0,
+        '❤️': 0,
+        '😴': 0,
+      };
+      this.broadcastSlideReactionSummary(slideId, counts);
+    }
+
+    this.pendingReactionSlides.clear();
+  }
+
+  public broadcastSlideReactionSummary(slideId: string, counts: ReactionCounts): void {
+    const event: RealtimeEvent<ReactionSummaryPayload> = {
+      id: `evt-react-sum-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      type: 'reaction.summary',
+      sessionId: this.sessionId,
+      timestamp: new Date().toISOString(),
+      payload: {
+        slideId,
+        counts: { ...counts },
+        timestamp: new Date().toISOString(),
+      },
+    };
+    this.broadcast(event);
+  }
+
+  public destroy(): void {
+    if (this.reactionBatchTimer) {
+      clearTimeout(this.reactionBatchTimer);
+      this.reactionBatchTimer = null;
+    }
+    this.sockets.clear();
+    this.socketTokens.clear();
   }
 
   public removeConnection(ws: WebSocket): void {
@@ -290,22 +452,6 @@ export class SessionCoordinatorDO {
 }
 
 export const SessionDurableObject = SessionCoordinatorDO;
-
-class RateLimiter {
-  private records = new Map<string, number[]>();
-
-  public check(key: string, limit: number, windowMs: number): boolean {
-    const now = Date.now();
-    const timestamps = (this.records.get(key) || []).filter((t) => now - t < windowMs);
-    if (timestamps.length >= limit) {
-      this.records.set(key, timestamps);
-      return false;
-    }
-    timestamps.push(now);
-    this.records.set(key, timestamps);
-    return true;
-  }
-}
 
 function jsonResponse(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), {
@@ -1775,21 +1921,8 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         return errorResponse('Slide has not been revealed yet', 403);
       }
 
-      let sessionReactions = store.reactions.get(sessionId);
-      if (!sessionReactions) {
-        sessionReactions = new Map();
-        store.reactions.set(sessionId, sessionReactions);
-      }
-
-      const currentCounts: ReactionCounts = sessionReactions.get(body.slideId) || {
-        '👍': 0,
-        '🤔': 0,
-        '❤️': 0,
-        '😴': 0,
-      };
-
-      currentCounts[body.reaction] += 1;
-      sessionReactions.set(body.slideId, currentCounts);
+      const coordinator = getCoordinator(sessionId);
+      const currentCounts = coordinator.recordReaction(body.slideId, body.reaction);
 
       broadcastRealtimeEvent(sessionId, 'reaction.added', {
         slideId: body.slideId,

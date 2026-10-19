@@ -6,6 +6,7 @@ import type {
   PollDefinition,
   Presentation,
   PresentationSession,
+  ReactionCounts,
   WordCloudAggregate,
 } from '@agora/contracts';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -1668,5 +1669,185 @@ describe('Worker HTTP API Integration Tests', () => {
       ),
     );
     expect(unrevealedUpvoteRes.status).toBe(403);
+  });
+
+  it('SPEC-009: Durable Object aggregates reactions, enforces rate limits, rejects unrevealed slides, and broadcasts batched summaries over WebSockets', async () => {
+    // 1. Create presentation and session
+    const presRes = await app.fetch(
+      new Request('https://api.agora.test/api/v1/presentations', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'Reactions Test Deck',
+          endingSlideId: 'slide-2',
+          slides: [
+            {
+              id: 'slide-1',
+              presentationId: 'p-react',
+              title: 'Intro',
+              horizontalIndex: 0,
+              verticalIndex: 0,
+              order: 0,
+            },
+            {
+              id: 'slide-2',
+              presentationId: 'p-react',
+              title: 'Secret',
+              horizontalIndex: 1,
+              verticalIndex: 0,
+              order: 1,
+            },
+          ],
+        }),
+      }),
+    );
+    const pres = (await presRes.json()) as Presentation;
+
+    const sessionRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/presentations/${pres.id}/sessions`, {
+        method: 'POST',
+        headers: adminHeaders,
+      }),
+    );
+    expect(sessionRes.status).toBe(201);
+    const session = (await sessionRes.json()) as PresentationSession & { presenterToken: string };
+
+    // 2. Join participant Alice
+    const joinRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Alice' }),
+      }),
+    );
+    const alice = (await joinRes.json()) as ParticipantIdentity;
+
+    const coordinator = app.getCoordinator(session.id);
+    const receivedMessages: string[] = [];
+    const mockWs = {
+      readyState: 1,
+      send: (data: string) => {
+        receivedMessages.push(data);
+      },
+      close: () => {},
+    } as unknown as WebSocket;
+
+    coordinator.handleConnection(mockWs, '*', alice.token);
+
+    // Clear initial snapshot
+    receivedMessages.length = 0;
+
+    // 3. Alice sends 👍 reaction on revealed slide-1
+    const accepted = coordinator.handleMessage(
+      mockWs,
+      JSON.stringify({
+        type: 'reaction.added',
+        token: alice.token,
+        payload: {
+          slideId: 'slide-1',
+          reaction: '👍',
+        },
+      }),
+    );
+    expect(accepted).toBe(true);
+
+    // Flush batched reaction summary
+    coordinator.flushReactionSummaries();
+    expect(receivedMessages.length).toBeGreaterThanOrEqual(1);
+    const summaryMsg = JSON.parse(receivedMessages[receivedMessages.length - 1]!);
+    expect(summaryMsg.type).toBe('reaction.summary');
+    expect(summaryMsg.payload.slideId).toBe('slide-1');
+    expect(summaryMsg.payload.counts['👍']).toBe(1);
+    expect(summaryMsg.payload.counts['❤️']).toBe(0);
+
+    // 4. Batch aggregation of multiple reactions
+    coordinator.handleMessage(
+      mockWs,
+      JSON.stringify({
+        type: 'reaction.added',
+        token: alice.token,
+        payload: { slideId: 'slide-1', reaction: '👍' },
+      }),
+    );
+    coordinator.handleMessage(
+      mockWs,
+      JSON.stringify({
+        type: 'reaction.added',
+        token: alice.token,
+        payload: { slideId: 'slide-1', reaction: '❤️' },
+      }),
+    );
+
+    coordinator.flushReactionSummaries();
+    const batchSummary = JSON.parse(receivedMessages[receivedMessages.length - 1]!);
+    expect(batchSummary.type).toBe('reaction.summary');
+    expect(batchSummary.payload.counts['👍']).toBe(2);
+    expect(batchSummary.payload.counts['❤️']).toBe(1);
+
+    // 5. Unrevealed slide rejection over WebSocket
+    const unrevealedAccepted = coordinator.handleMessage(
+      mockWs,
+      JSON.stringify({
+        type: 'reaction.added',
+        token: alice.token,
+        payload: { slideId: 'slide-2', reaction: '😴' },
+      }),
+    );
+    expect(unrevealedAccepted).toBe(false);
+    const errSlideMsg = JSON.parse(receivedMessages[receivedMessages.length - 1]!);
+    expect(errSlideMsg.type).toBe('error');
+    expect(errSlideMsg.payload.code).toBe('SLIDE_NOT_REVEALED');
+
+    // 6. Rate limiting enforcement on rapid reaction flood
+    let rateLimitTriggered = false;
+    for (let i = 0; i < 15; i++) {
+      const ok = coordinator.handleMessage(
+        mockWs,
+        JSON.stringify({
+          type: 'reaction.added',
+          token: alice.token,
+          payload: { slideId: 'slide-1', reaction: '👍' },
+        }),
+      );
+      if (!ok) {
+        rateLimitTriggered = true;
+      }
+    }
+    expect(rateLimitTriggered).toBe(true);
+    const lastMsg = JSON.parse(receivedMessages[receivedMessages.length - 1]!);
+    expect(lastMsg.type).toBe('error');
+    expect(lastMsg.payload.code).toBe('RATE_LIMIT_EXCEEDED');
+
+    // 7. REST API reaction submission with rate limiting and unrevealed slide rejection
+    const restReactionRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/reactions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${alice.token}`,
+        },
+        body: JSON.stringify({ slideId: 'slide-1', reaction: '😴' }),
+      }),
+    );
+    expect(restReactionRes.status).toBe(200);
+    const restData = (await restReactionRes.json()) as { ok: boolean; summary: ReactionCounts };
+    expect(restData.ok).toBe(true);
+    expect(restData.summary['😴']).toBe(1);
+
+    // Reject unrevealed slide via REST -> 403
+    const restUnrevealedRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/reactions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${alice.token}`,
+        },
+        body: JSON.stringify({ slideId: 'slide-2', reaction: '🤔' }),
+      }),
+    );
+    expect(restUnrevealedRes.status).toBe(403);
+
+    // Destroy coordinator
+    coordinator.destroy();
   });
 });

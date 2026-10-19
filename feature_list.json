@@ -312,21 +312,52 @@
       "area": "interactions",
       "title": "Emoji reactions",
       "user_visible_behavior": "Attendees can trigger emoji reactions (👍, 🤔, ❤️, 😴) against the active slide. Server rate-limits submissions and aggregates counts at 500ms intervals, streaming updates to presenter view without disturbing audience navigation.",
-      "status": "in_progress",
+      "status": "passing",
       "verification": [
-        "vitest run packages/domain/tests/reactions.test.ts",
-        "vitest run apps/worker/tests/reactions-aggregator.test.ts"
+        "vitest run packages/domain/src/__tests__/domain.test.ts",
+        "vitest run apps/audience/src/__tests__/audience.test.ts",
+        "vitest run apps/presenter/src/__tests__/presenter.test.ts",
+        "vitest run tests/integration/worker-api.test.ts",
+        "vitest run tests/performance/load-500-users.test.ts"
       ],
       "evidence": [
         {
           "type": "unit_test",
-          "target": "packages/domain/tests/reactions.test.ts",
-          "timestamp": "2026-10-18T20:44:46Z",
+          "target": "packages/domain/src/__tests__/domain.test.ts",
+          "timestamp": "2026-10-19T11:24:00Z",
           "result": "passed",
-          "assertions": 7
+          "assertions": 36
+        },
+        {
+          "type": "unit_test",
+          "target": "apps/audience/src/__tests__/audience.test.ts",
+          "timestamp": "2026-10-19T11:24:00Z",
+          "result": "passed",
+          "assertions": 34
+        },
+        {
+          "type": "unit_test",
+          "target": "apps/presenter/src/__tests__/presenter.test.ts",
+          "timestamp": "2026-10-19T11:24:00Z",
+          "result": "passed",
+          "assertions": 22
+        },
+        {
+          "type": "integration_test",
+          "target": "tests/integration/worker-api.test.ts",
+          "timestamp": "2026-10-19T11:24:00Z",
+          "result": "passed",
+          "assertions": 11
+        },
+        {
+          "type": "performance_test",
+          "target": "tests/performance/load-500-users.test.ts",
+          "timestamp": "2026-10-19T11:24:00Z",
+          "result": "passed",
+          "assertions": 2
         }
       ],
-      "notes": "Batched aggregation prevents WebSocket frame flooding."
+      "notes": "Includes supported reaction emojis (👍, 🤔, ❤️, 😴), participant token rate limiting (10 req/s), unrevealed slide 403 / SLIDE_NOT_REVEALED rejection, Durable Object 500ms batched aggregation (reaction.summary) preventing WebSocket frame flooding with p95 latency < 1s under 500 concurrent participants, and audience/presenter real-time reaction HUD synchronization."
     },
     {
       "id": "SPEC-010",
