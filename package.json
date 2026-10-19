@@ -26,6 +26,7 @@
     "prepare": "git config core.hooksPath .githooks || true",
     "commitlint": "node harness/verify-commit-msg.mjs --last",
     "cf:emulate": "node infrastructure/cloudflare/local-emulate-check.mjs",
+    "cf:provision": "node infrastructure/cloudflare/provision.mjs",
     "harness:validate": "node harness/validate-harness.mjs",
     "harness:arch": "node harness/verify-architecture.mjs",
     "harness:victory": "node harness/victory-detector.mjs",

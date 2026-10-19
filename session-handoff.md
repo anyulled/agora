@@ -10,20 +10,15 @@
 - Conventional Commits (`commitlint.config.mjs`), ESLint 9 strict flat configuration (`eslint.config.mjs`), `jscpd` code duplication detector (`<= 10%` threshold; 1.6% actual), Mermaid diagram validator (`harness/verify-mermaid.mjs`), OpenAPI 3.1.0 route verifier (`harness/verify-openapi.mjs`), Biome formatting/linting, and Git hooks are active and enforced locally and in CI.
 
 ## Changed This Session
-- Implemented `#14 SPEC-008: Embedded Q&A slide`, `#15 SPEC-008a`, and `#16 SPEC-008b` in `@agora/reveal-plugin`:
-  - Added `QaSlideControllerOptions` (`presenterToken`, `fetchFn`, `slideTitles`, `onMarkAnswered`).
-  - Added `injectQaStylesOnce` providing high-contrast large-screen presentation styling (WCAG 2.2 AA compliant) for conference projectors.
-  - Added `setSlideTitles` and `getSlideTitle` for slide title lookup.
-  - Added `loadQuestions` via `GET /api/v1/sessions/:id/questions?sortBy=votes&order=desc`.
-  - Added `markAnswered` with optimistic UI update and `PATCH /api/v1/sessions/:id/questions/:questionId` execution.
-  - Added `handleRealtimeEvent` processing `question.submitted`, `question.upvoted`, and `question.updated`.
-  - Added `renderPreservingScroll` to preserve scroll position during live incoming updates.
-  - In ranked list view: rendered vote badges (`.qa-votes-badge`), status badges (`.qa-status-badge`), referenced slide titles (`.qa-referenced-slide`), submitter names (`.qa-submitter-name`), and question text (`.qa-question-text`).
-  - In detail view: rendered question metadata, large legible question typography (`.qa-detail-question-text`), presenter "Mark as Answered" button (`.qa-mark-answered-btn`), referenced slide PNG snapshot (`.qa-slide-preview-image`), and graceful fallback placeholder (`.qa-slide-fallback`) when image errors.
-  - Handled keyboard events: `Escape` intercepts cleanly with `preventDefault()` and `stopPropagation()` returning to list view and restoring scroll position without altering Reveal.js slide coordinates.
-  - In `RevealAudiencePlugin`: extracted slide titles from Reveal deck slides via `collectSlideTitles()`, passed options to `QaSlideController`, forwarded real-time WebSocket events, and auto-mounted/loaded questions on slide change to `data-component="audience-qa"` slide.
-  - Added test coverage in `packages/reveal-plugin/src/__tests__/reveal-plugin.test.ts` (14/14 tests passing).
-  - Closed GitHub issues #15 (`SPEC-008a`), #16 (`SPEC-008b`), and #14 (`SPEC-008`).
+- Implemented Cloudflare Infrastructure as Code (IaC) Provisioner (`infrastructure/cloudflare/provision.mjs` & `provision.d.mts`):
+  - Idempotently creates D1 database (`agora-d1`) and R2 bucket (`agora-assets`) via Cloudflare v4 REST API using `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+  - Automatically updates `infrastructure/cloudflare/wrangler.toml` with the real D1 database UUID.
+  - Added npm script `"cf:provision": "node infrastructure/cloudflare/provision.mjs"` in `package.json`.
+  - Added unit/integration test suite `tests/integration/cloudflare-provision.test.ts` (3/3 tests passing).
+- Updated `.github/workflows/deploy.yml`:
+  - Added automated IaC provisioning step (`node infrastructure/cloudflare/provision.mjs`).
+  - Added D1 remote migrations step (`wrangler d1 migrations apply DB --remote`).
+  - Fixed `workingDirectory` from `'apps/worker'` to `'infrastructure/cloudflare'`.
 
 ## Broken Or Unverified
 - None. All local checks, ESLint/Biome/jscpd/Mermaid/OpenAPI linters, Three-Layer Victory Detector, Cloudflare emulation tests, and GitHub Actions CI/CD workflows are green.

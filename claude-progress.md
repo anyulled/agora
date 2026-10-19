@@ -351,8 +351,27 @@
 - **Verification Evidence**:
   - `pnpm test`, `./init.sh`, and `pnpm run verify`: 13/13 test suites (166 tests) passing, 0 ESLint warnings, 0 typecheck errors, 1.6% code duplication (`<= 10%`).
   - `pnpm run harness:victory`: 🏆 Victory Detected (Layer 1, Layer 2, Layer 3 passing).
+---
 
-
-
-
+## Session 017 — 2026-10-19
+- **Role**: Cloudflare Infrastructure & CI/CD Automation Engineer
+- **Goals**:
+  1. Implement automated Infrastructure as Code (IaC) to idempotently provision Cloudflare D1 database (`agora-d1`) and R2 bucket (`agora-assets`).
+  2. Integrate automated IaC provisioning, D1 migrations (`d1 migrations apply DB --remote`), and Worker deployment into `.github/workflows/deploy.yml`.
+  3. Ensure zero manual dashboard actions or UUID copy-pasting required for deployment.
+  4. Verify with integration tests, typechecking, formatting, and `./init.sh`.
+- **Completed**:
+  - Implemented `infrastructure/cloudflare/provision.mjs` and `infrastructure/cloudflare/provision.d.mts`:
+    - Queries Cloudflare v4 REST API using `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+    - Idempotently verifies and creates D1 database `agora-d1` and R2 bucket `agora-assets`.
+    - Automatically updates `infrastructure/cloudflare/wrangler.toml` with the resolved D1 database UUID.
+    - Exports `AGORA_D1_DATABASE_ID` and `AGORA_R2_BUCKET` to `GITHUB_ENV` in CI environments.
+  - Added script `"cf:provision": "node infrastructure/cloudflare/provision.mjs"` to root `package.json`.
+  - Added unit/integration test suite `tests/integration/cloudflare-provision.test.ts` (3/3 tests passing).
+  - Updated `.github/workflows/deploy.yml`:
+    - Added IaC provisioning step (`node infrastructure/cloudflare/provision.mjs`).
+    - Added D1 remote database migration step (`wrangler d1 migrations apply DB --remote`).
+    - Fixed `workingDirectory` from `'apps/worker'` to `'infrastructure/cloudflare'`.
+- **Verification Evidence**:
+  - `pnpm test`, `./init.sh`: 14/14 test suites (169 tests) passing, 0 lint/format warnings, 0 typecheck errors.
 
