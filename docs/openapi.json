@@ -541,6 +541,56 @@
         }
       }
     },
+    "/api/v1/presentations/{id}/navigation-rules": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Presentation identifier",
+          "schema": { "type": "string" }
+        }
+      ],
+      "get": {
+        "tags": ["Presentations"],
+        "operationId": "listNavigationRules",
+        "summary": "List adaptive-navigation rules configured for a presentation (SPEC-011)",
+        "security": [{ "AdminBearerAuth": [] }, { "AdminHeaderToken": [] }],
+        "responses": { "200": { "description": "Presentation navigation rules" } }
+      },
+      "post": {
+        "tags": ["Presentations"],
+        "operationId": "createNavigationRule",
+        "summary": "Configure an adaptive branch rule for a presentation (SPEC-011)",
+        "security": [{ "AdminBearerAuth": [] }, { "AdminHeaderToken": [] }],
+        "responses": { "201": { "description": "Created navigation rule" } }
+      }
+    },
+    "/api/v1/presentations/{id}/navigation-rules/{ruleId}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Presentation identifier",
+          "schema": { "type": "string" }
+        },
+        {
+          "name": "ruleId",
+          "in": "path",
+          "required": true,
+          "description": "Navigation rule identifier",
+          "schema": { "type": "string" }
+        }
+      ],
+      "delete": {
+        "tags": ["Presentations"],
+        "operationId": "deleteNavigationRule",
+        "summary": "Remove an adaptive branch rule from a presentation (SPEC-011)",
+        "security": [{ "AdminBearerAuth": [] }, { "AdminHeaderToken": [] }],
+        "responses": { "200": { "description": "Deleted navigation rule" } }
+      }
+    },
     "/api/v1/presentations/{id}/sessions": {
       "parameters": [
         {

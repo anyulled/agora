@@ -1,9 +1,11 @@
 import type {
   AudienceQuestion,
   AudienceSafeSessionView,
+  NavigationRule,
   NavigationSuggestion,
   ParticipantIdentity,
   PollDefinition,
+  PollResultsSummary,
   Presentation,
   PresentationSession,
   ReactionCounts,
@@ -535,20 +537,24 @@ describe('Worker HTTP API Integration Tests', () => {
     expect(pollRes.status).toBe(201);
     const poll = (await pollRes.json()) as PollDefinition;
 
-    // Configure navigation rule for this poll
-    app.store.navigationRules.set(pres.id, [
-      {
-        id: 'rule-adaptive-1',
-        presentationId: pres.id,
-        sourceSlideId: 'slide-poll',
-        pollId: poll.id,
-        optionId: 'opt-yes',
-        minVoteThreshold: 1,
-        targetSlideId: 'slide-advanced',
-        targetHorizontalIndex: 1,
-        targetVerticalIndex: 1,
-      },
-    ]);
+    // Configure the branch through presentation settings. The API validates the
+    // stable IDs and requires coordinates to match the destination slide.
+    const ruleRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/presentations/${pres.id}/navigation-rules`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          sourceSlideId: 'slide-poll',
+          pollId: poll.id,
+          optionId: 'opt-yes',
+          minVoteThreshold: 1,
+          targetSlideId: 'slide-advanced',
+          targetHorizontalIndex: 1,
+          targetVerticalIndex: 1,
+        }),
+      }),
+    );
+    expect(ruleRes.status).toBe(201);
 
     // 3. Attendee joins and votes
     const joinRes = await app.fetch(
@@ -571,12 +577,32 @@ describe('Worker HTTP API Integration Tests', () => {
       }),
     );
     expect(voteRes.status).toBe(200);
-    const voteData = (await voteRes.json()) as {
+    const voteData = (await voteRes.json()) as { summary: PollResultsSummary };
+    expect(voteData.summary.countsByOptionId['opt-yes']).toBe(1);
+
+    // Poll closure, rather than an individual vote, evaluates rules and sends
+    // the presenter's explicitly-confirmable suggestion.
+    const closeRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${session.id}/polls/${poll.id}/close`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.presenterToken}` },
+      }),
+    );
+    expect(closeRes.status).toBe(200);
+    const closedPoll = (await closeRes.json()) as PollDefinition & {
       suggestions: NavigationSuggestion[];
     };
-    expect(voteData.suggestions.length).toBe(1);
-    expect(voteData.suggestions[0]?.targetSlideId).toBe('slide-advanced');
-    expect(voteData.suggestions[0]?.targetHorizontalIndex).toBe(1);
+    expect(closedPoll.suggestions).toHaveLength(1);
+    expect(closedPoll.suggestions[0]?.targetSlideId).toBe('slide-advanced');
+    expect(closedPoll.suggestions[0]?.targetHorizontalIndex).toBe(1);
+
+    const listedRules = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/presentations/${pres.id}/navigation-rules`, {
+        headers: adminHeaders,
+      }),
+    );
+    expect(listedRules.status).toBe(200);
+    expect((await listedRules.json()) as NavigationRule[]).toHaveLength(1);
 
     // 4. Word cloud prompt and submission
     const wcRes = await app.fetch(

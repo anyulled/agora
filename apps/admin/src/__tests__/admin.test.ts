@@ -144,6 +144,57 @@ describe('AdminAppController (SPEC-001, SPEC-013, SPEC-015, SPEC-017, SPEC-024)'
     });
   });
 
+  describe('Adaptive Navigation Settings (SPEC-011)', () => {
+    it('configures and removes a branch rule that targets a valid 2D destination', () => {
+      const presentation = admin.createPresentation({
+        title: 'Branching Deck',
+        slides: [
+          { title: 'Poll', horizontalIndex: 0, verticalIndex: 0 },
+          { title: 'Details', horizontalIndex: 1, verticalIndex: 1 },
+        ],
+      });
+      const [sourceSlide, targetSlide] = presentation.slides ?? [];
+
+      const rule = admin.addNavigationRule(presentation.id, {
+        sourceSlideId: sourceSlide!.id,
+        pollId: 'poll-architecture',
+        optionId: 'show-details',
+        minVoteThreshold: 3,
+        minPercentageThreshold: 60,
+        targetSlideId: targetSlide!.id,
+        targetHorizontalIndex: 1,
+        targetVerticalIndex: 1,
+      });
+
+      expect(admin.getNavigationRules(presentation.id)).toEqual([rule]);
+      admin.removeNavigationRule(presentation.id, rule.id);
+      expect(admin.getNavigationRules(presentation.id)).toEqual([]);
+    });
+
+    it('rejects a branch rule whose coordinates do not identify its target slide', () => {
+      const presentation = admin.createPresentation({
+        title: 'Validated Branching Deck',
+        slides: [
+          { title: 'Poll', horizontalIndex: 0, verticalIndex: 0 },
+          { title: 'Details', horizontalIndex: 1, verticalIndex: 1 },
+        ],
+      });
+      const [sourceSlide, targetSlide] = presentation.slides ?? [];
+
+      expect(() =>
+        admin.addNavigationRule(presentation.id, {
+          sourceSlideId: sourceSlide!.id,
+          pollId: 'poll-architecture',
+          optionId: 'show-details',
+          minVoteThreshold: 1,
+          targetSlideId: targetSlide!.id,
+          targetHorizontalIndex: 1,
+          targetVerticalIndex: 0,
+        }),
+      ).toThrow(/coordinates must match/);
+    });
+  });
+
   describe('Browser-side PNG Generation Workflow (SPEC-013)', () => {
     it('tracks per-slide progress, logs errors, and retries failed slides', async () => {
       const pres = admin.createPresentation({
