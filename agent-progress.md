@@ -1,9 +1,19 @@
 # Agora Engineering Progress Log
 
+## Session 029 — 2026-10-19
+
+- Implemented GitHub issue #20 (SPEC-012) in isolated worktree `../agora-issue-20` from `origin/main`.
+- Added Worker-served presenter and projector session pages at `/presenter/:sessionId` and `/projector/:sessionId`.
+- Wired authenticated presenter navigation through the existing session APIs, including keyboard arrow handling, directional controls, session completion, and live refresh over WebSocket/polling.
+- Reused presenter controller state to render current-slide viewport, reaction tallies, question count, and connected attendee count while keeping projector output free of private controls.
+- Added integration coverage proving presenter auth is required and projector fragments do not expose presenter metrics or navigation controls.
+- `./init.sh` passed and `pnpm run verify` passed: 15 test files, 194 tests, full harness validation, workspace build, and all three victory layers.
+
 > Progress log adhering to Harness Engineering Practice 5.
 > Tracks session continuity, verified states, and cumulative system achievements.
 
 ## Current System State
+
 - **Workspace**: `/Users/alrs/Documents/agora`
 - **Harness Status**: Active (14 Practices instantiated)
 - **Feature State**: 24/24 features specified in `feature_list.json` (all SPEC-001 through SPEC-024)

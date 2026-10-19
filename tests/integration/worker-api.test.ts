@@ -345,6 +345,143 @@ describe('Worker HTTP API Integration Tests', () => {
     expect(completedSession.completedAt).toBeDefined();
   });
 
+  it('serves authenticated presenter fragments and keeps projector fragments free of private controls', async () => {
+    const presRes = await app.fetch(
+      new Request('https://api.agora.test/api/v1/presentations', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          title: 'Presenter Console Deck',
+          endingSlideId: 'slide-detail',
+          slides: [
+            {
+              id: 'slide-intro',
+              presentationId: 'presenter-deck',
+              title: 'Opening Slide',
+              horizontalIndex: 0,
+              verticalIndex: 0,
+              order: 0,
+            },
+            {
+              id: 'slide-overview',
+              presentationId: 'presenter-deck',
+              title: 'Overview',
+              horizontalIndex: 1,
+              verticalIndex: 0,
+              order: 1,
+            },
+            {
+              id: 'slide-detail',
+              presentationId: 'presenter-deck',
+              title: 'Deep Detail',
+              horizontalIndex: 1,
+              verticalIndex: 1,
+              order: 2,
+            },
+          ],
+        }),
+      }),
+    );
+    const presentation = (await presRes.json()) as Presentation;
+
+    const sessionRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/presentations/${presentation.id}/sessions`, {
+        method: 'POST',
+        headers: adminHeaders,
+      }),
+    );
+    const sessionPayload = (await sessionRes.json()) as PresentationSession & {
+      presenterToken: string;
+    };
+
+    const joinRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${sessionPayload.id}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Dana' }),
+      }),
+    );
+    const attendee = (await joinRes.json()) as ParticipantIdentity;
+
+    const questionRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${sessionPayload.id}/questions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${attendee.token}`,
+        },
+        body: JSON.stringify({
+          slideId: 'slide-intro',
+          content: 'Can we show the architecture breakdown next?',
+        }),
+      }),
+    );
+    expect(questionRes.status).toBe(201);
+
+    const reactionRes = await app.fetch(
+      new Request(`https://api.agora.test/api/v1/sessions/${sessionPayload.id}/reactions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${attendee.token}`,
+        },
+        body: JSON.stringify({ slideId: 'slide-intro', reaction: '👍' }),
+      }),
+    );
+    expect(reactionRes.status).toBe(200);
+    app.getCoordinator(sessionPayload.id).flushReactionSummaries();
+
+    const unauthorizedPresenter = await app.fetch(
+      new Request(`https://api.agora.test/presenter/${sessionPayload.id}?fragment=1`),
+    );
+    expect(unauthorizedPresenter.status).toBe(403);
+
+    const presenterShell = await app.fetch(
+      new Request(
+        `https://api.agora.test/presenter/${sessionPayload.id}?token=${encodeURIComponent(sessionPayload.presenterToken)}`,
+      ),
+    );
+    expect(presenterShell.status).toBe(200);
+    const presenterShellHtml = await presenterShell.text();
+    expect(presenterShellHtml).toContain('Agora Presenter Console');
+    expect(presenterShellHtml).toContain('Use arrow keys or the directional pad');
+
+    const presenterFragment = await app.fetch(
+      new Request(
+        `https://api.agora.test/presenter/${sessionPayload.id}?fragment=1&token=${encodeURIComponent(sessionPayload.presenterToken)}`,
+      ),
+    );
+    expect(presenterFragment.status).toBe(200);
+    expect(presenterFragment.headers.get('Content-Type')).toContain('text/html');
+    const presenterHtml = await presenterFragment.text();
+    expect(presenterHtml).toContain('Opening Slide');
+    expect(presenterHtml).toContain('Coordinates: [0, 0]');
+    expect(presenterHtml).toContain('Attendees');
+    expect(presenterHtml).toContain('Questions');
+    expect(presenterHtml).toContain('👍 1');
+    expect(presenterHtml).toContain('data-action="nav-right"');
+    expect(presenterHtml).toContain('data-action="complete-session"');
+    expect(presenterHtml).toContain('agora-page-state');
+
+    const projectorShell = await app.fetch(
+      new Request(`https://api.agora.test/projector/${sessionPayload.id}`),
+    );
+    expect(projectorShell.status).toBe(200);
+    const projectorShellHtml = await projectorShell.text();
+    expect(projectorShellHtml).toContain('Agora Projector View');
+
+    const projectorFragment = await app.fetch(
+      new Request(`https://api.agora.test/projector/${sessionPayload.id}?fragment=1`),
+    );
+    expect(projectorFragment.status).toBe(200);
+    const projectorHtml = await projectorFragment.text();
+    expect(projectorHtml).toContain('Opening Slide');
+    expect(projectorHtml).not.toContain('Attendees');
+    expect(projectorHtml).not.toContain('data-action="nav-right"');
+    expect(projectorHtml).not.toContain('metrics-hud');
+    expect(projectorHtml).not.toContain('Complete Session');
+  });
+
   it('manages Q&A, idempotent upvote toggling, and presenter status updates', async () => {
     // Create presentation and session
     const presRes = await app.fetch(
