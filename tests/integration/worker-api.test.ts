@@ -346,99 +346,82 @@ describe('Worker HTTP API Integration Tests', () => {
   });
 
   it('serves authenticated presenter fragments and keeps projector fragments free of private controls', async () => {
-    const presRes = await app.fetch(
-      new Request('https://api.agora.test/api/v1/presentations', {
-        method: 'POST',
-        headers: adminHeaders,
-        body: JSON.stringify({
-          title: 'Presenter Console Deck',
-          endingSlideId: 'slide-detail',
-          slides: [
-            {
-              id: 'slide-intro',
-              presentationId: 'presenter-deck',
-              title: 'Opening Slide',
-              horizontalIndex: 0,
-              verticalIndex: 0,
-              order: 0,
-            },
-            {
-              id: 'slide-overview',
-              presentationId: 'presenter-deck',
-              title: 'Overview',
-              horizontalIndex: 1,
-              verticalIndex: 0,
-              order: 1,
-            },
-            {
-              id: 'slide-detail',
-              presentationId: 'presenter-deck',
-              title: 'Deep Detail',
-              horizontalIndex: 1,
-              verticalIndex: 1,
-              order: 2,
-            },
-          ],
-        }),
-      }),
+    const presentationId = 'presenter-deck';
+    const sessionId = 'presenter-session';
+    const presenterToken = 'presenter-token';
+    const slides = [
+      {
+        id: 'slide-intro',
+        presentationId,
+        title: 'Opening Slide',
+        horizontalIndex: 0,
+        verticalIndex: 0,
+        order: 0,
+      },
+      {
+        id: 'slide-overview',
+        presentationId,
+        title: 'Overview',
+        horizontalIndex: 1,
+        verticalIndex: 0,
+        order: 1,
+      },
+      {
+        id: 'slide-detail',
+        presentationId,
+        title: 'Deep Detail',
+        horizontalIndex: 1,
+        verticalIndex: 1,
+        order: 2,
+      },
+    ];
+    app.store.presentations.set(presentationId, {
+      id: presentationId,
+      title: 'Presenter Console Deck',
+      revision: 'rev-1',
+      status: 'published',
+      endingSlideId: 'slide-detail',
+      branding: { colors: {} },
+      slides,
+    });
+    app.store.slides.set(presentationId, slides);
+    app.store.assets.set(presentationId, []);
+    app.store.sessions.set(sessionId, {
+      id: sessionId,
+      presentationId,
+      presentationRevision: 'rev-1',
+      status: 'live',
+      currentSlideId: 'slide-intro',
+      revealedSlideIds: ['slide-intro'],
+      pdfDownloadUnlocked: false,
+      connectedParticipants: 1,
+    });
+    app.store.presenterTokens.set(sessionId, presenterToken);
+    app.store.questions.set(sessionId, [
+      {
+        id: 'question-1',
+        sessionId,
+        slideId: 'slide-intro',
+        participantId: 'attendee-1',
+        content: 'Can we show the architecture breakdown next?',
+        status: 'pending',
+        upvotes: 0,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    app.store.reactions.set(
+      sessionId,
+      new Map([['slide-intro', { '👍': 1, '🤔': 0, '❤️': 0, '😴': 0 }]]),
     );
-    const presentation = (await presRes.json()) as Presentation;
-
-    const sessionRes = await app.fetch(
-      new Request(`https://api.agora.test/api/v1/presentations/${presentation.id}/sessions`, {
-        method: 'POST',
-        headers: adminHeaders,
-      }),
-    );
-    const sessionPayload = (await sessionRes.json()) as PresentationSession & {
-      presenterToken: string;
-    };
-
-    const joinRes = await app.fetch(
-      new Request(`https://api.agora.test/api/v1/sessions/${sessionPayload.id}/join`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ displayName: 'Dana' }),
-      }),
-    );
-    const attendee = (await joinRes.json()) as ParticipantIdentity;
-
-    const questionRes = await app.fetch(
-      new Request(`https://api.agora.test/api/v1/sessions/${sessionPayload.id}/questions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${attendee.token}`,
-        },
-        body: JSON.stringify({
-          slideId: 'slide-intro',
-          content: 'Can we show the architecture breakdown next?',
-        }),
-      }),
-    );
-    expect(questionRes.status).toBe(201);
-
-    const reactionRes = await app.fetch(
-      new Request(`https://api.agora.test/api/v1/sessions/${sessionPayload.id}/reactions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${attendee.token}`,
-        },
-        body: JSON.stringify({ slideId: 'slide-intro', reaction: '👍' }),
-      }),
-    );
-    expect(reactionRes.status).toBe(200);
-    app.getCoordinator(sessionPayload.id).flushReactionSummaries();
 
     const unauthorizedPresenter = await app.fetch(
-      new Request(`https://api.agora.test/presenter/${sessionPayload.id}?fragment=1`),
+      new Request(`https://api.agora.test/presenter/${sessionId}?fragment=1`),
     );
     expect(unauthorizedPresenter.status).toBe(403);
 
     const presenterShell = await app.fetch(
       new Request(
-        `https://api.agora.test/presenter/${sessionPayload.id}?token=${encodeURIComponent(sessionPayload.presenterToken)}`,
+        `https://api.agora.test/presenter/${sessionId}?token=${encodeURIComponent(presenterToken)}`,
       ),
     );
     expect(presenterShell.status).toBe(200);
@@ -448,7 +431,7 @@ describe('Worker HTTP API Integration Tests', () => {
 
     const presenterFragment = await app.fetch(
       new Request(
-        `https://api.agora.test/presenter/${sessionPayload.id}?fragment=1&token=${encodeURIComponent(sessionPayload.presenterToken)}`,
+        `https://api.agora.test/presenter/${sessionId}?fragment=1&token=${encodeURIComponent(presenterToken)}`,
       ),
     );
     expect(presenterFragment.status).toBe(200);
@@ -464,14 +447,14 @@ describe('Worker HTTP API Integration Tests', () => {
     expect(presenterHtml).toContain('agora-page-state');
 
     const projectorShell = await app.fetch(
-      new Request(`https://api.agora.test/projector/${sessionPayload.id}`),
+      new Request(`https://api.agora.test/projector/${sessionId}`),
     );
     expect(projectorShell.status).toBe(200);
     const projectorShellHtml = await projectorShell.text();
     expect(projectorShellHtml).toContain('Agora Projector View');
 
     const projectorFragment = await app.fetch(
-      new Request(`https://api.agora.test/projector/${sessionPayload.id}?fragment=1`),
+      new Request(`https://api.agora.test/projector/${sessionId}?fragment=1`),
     );
     expect(projectorFragment.status).toBe(200);
     const projectorHtml = await projectorFragment.text();

@@ -1,5 +1,10 @@
 # Agora Engineering Progress Log
 
+## Session 030 PR #51 SonarCloud duplication — 2026-10-19
+- Simplified presenter/projector route integration-test setup by seeding the in-memory app store directly; removed repeated create-presentation, create-session, join, question, and reaction request scaffolding while retaining route/auth/privacy assertions.
+- Targeted presenter fragment integration test passed. `pnpm run verify` passed all checks with 194 tests; `./init.sh` also passed with 194 tests.
+- SonarCloud new-code duplicate lines previously came entirely from repeated setup in `tests/integration/worker-api.test.ts` (29 duplicated lines); fresh hosted analysis is pending push.
+
 ## Session 029 — 2026-10-19
 
 - Implemented GitHub issue #20 (SPEC-012) in isolated worktree `../agora-issue-20` from `origin/main`.
