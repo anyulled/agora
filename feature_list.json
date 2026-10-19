@@ -407,17 +407,35 @@
       "title": "Presenter view",
       "user_visible_behavior": "Presenter interface shows current slide viewport, 2D directional arrows matching Reveal.js navigation, live reaction counts, question count, and connected attendee count. Controls and administrative actions never leak to the public projector view.",
       "status": "passing",
-      "verification": ["vitest run apps/presenter/tests/presenter-view.test.ts"],
+      "verification": [
+        "pnpm exec vitest run apps/presenter/src/__tests__/presenter.test.ts tests/integration/worker-api.test.ts",
+        "./init.sh",
+        "pnpm run verify"
+      ],
       "evidence": [
         {
-          "type": "component_test",
-          "target": "apps/presenter/tests/presenter-view.test.ts",
+          "type": "unit_test",
+          "target": "apps/presenter/src/__tests__/presenter.test.ts",
           "timestamp": "2026-10-18T20:44:56Z",
           "result": "passed",
-          "assertions": 9
+          "assertions": 22
+        },
+        {
+          "type": "integration_test",
+          "target": "tests/integration/worker-api.test.ts",
+          "timestamp": "2026-10-19T14:38:05Z",
+          "result": "passed",
+          "assertions": 12
+        },
+        {
+          "type": "verification",
+          "target": "pnpm run verify",
+          "timestamp": "2026-10-19T14:38:05Z",
+          "result": "passed",
+          "assertions": 194
         }
       ],
-      "notes": "Strict visual isolation between presenter controls and public projection."
+      "notes": "Presenter and projector session pages are now served by the Worker via /presenter/:sessionId and /projector/:sessionId, with authenticated presenter navigation, keyboard arrow handling, live metrics refresh, and strict projection isolation from private controls."
     },
     {
       "id": "SPEC-013",

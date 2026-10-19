@@ -1,5 +1,6 @@
 import {
   ALLOWED_REACTIONS,
+  type AssetManifest,
   type AssetManifestEntry,
   type AudienceQuestion,
   type AudienceSafeSessionView,
@@ -31,6 +32,11 @@ import {
   startScheduledSession,
   updateQuestionStatus,
 } from '@agora/domain';
+import {
+  PresenterAppController,
+  renderPresenterViewHtml,
+  renderProjectorViewHtml,
+} from '../../presenter/src/index';
 import type {
   LocalD1Database,
   LocalDurableObjectNamespace,
@@ -473,6 +479,733 @@ function errorResponse(message: string, status = 400): Response {
   return jsonResponse({ error: message }, status);
 }
 
+function htmlResponse(markup: string, status = 200): Response {
+  return new Response(markup, {
+    status,
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  });
+}
+
+function serializeInlineJson(data: unknown): string {
+  return JSON.stringify(data)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026');
+}
+
+function getPresenterToken(request: Request, queryToken?: string | null): string | null {
+  if (queryToken?.trim()) {
+    return queryToken.trim();
+  }
+
+  const authHeader = request.headers.get('Authorization');
+  const customHeader = request.headers.get('x-presenter-token');
+  return authHeader?.startsWith('Bearer ')
+    ? authHeader.slice(7).trim()
+    : (customHeader?.trim() ?? null);
+}
+
+interface PresenterPagePayload {
+  sessionId: string;
+  slides: SlideMetadata[];
+  viewState: ReturnType<PresenterAppController['getViewState']>;
+}
+
+interface ProjectorPagePayload {
+  sessionId: string;
+  slides: SlideMetadata[];
+  viewState: ReturnType<PresenterAppController['getProjectorViewState']>;
+}
+
+function buildAssetManifest(
+  presentationId: string,
+  revision: string,
+  assets: AssetManifestEntry[],
+): AssetManifest {
+  const manifest: AssetManifest = {
+    presentationId,
+    revision,
+    slidePngs: {},
+  };
+
+  for (const asset of assets) {
+    if (asset.kind === 'slide-png' && asset.slideId) {
+      manifest.slidePngs[asset.slideId] = asset;
+      continue;
+    }
+    if (asset.kind === 'deck-pdf') {
+      manifest.deckPdf = asset;
+    }
+  }
+
+  return manifest;
+}
+
+function buildPresenterController(
+  store: InMemoryAgoraStore,
+  session: PresentationSession,
+  presentation: Presentation,
+): PresenterAppController {
+  const assets = (store.assets.get(session.presentationId) || []).filter(
+    (asset) => asset.revision === session.presentationRevision,
+  );
+  const controller = new PresenterAppController(
+    session,
+    presentation,
+    buildAssetManifest(session.presentationId, session.presentationRevision, assets),
+  );
+
+  controller.syncQuestions(store.questions.get(session.id) || []);
+
+  const reactionMap = store.reactions.get(session.id) || new Map<string, ReactionCounts>();
+  for (const [slideId, counts] of reactionMap.entries()) {
+    controller.handleRealtimeEvent({
+      id: generateSecureId('evt-page-react'),
+      type: 'reaction.summary',
+      sessionId: session.id,
+      timestamp: new Date().toISOString(),
+      payload: { slideId, counts },
+    });
+  }
+
+  return controller;
+}
+
+function buildPresenterPagePayload(
+  store: InMemoryAgoraStore,
+  session: PresentationSession,
+  presentation: Presentation,
+): PresenterPagePayload {
+  const controller = buildPresenterController(store, session, presentation);
+  return {
+    sessionId: session.id,
+    slides: [...(presentation.slides || [])],
+    viewState: controller.getViewState(),
+  };
+}
+
+function buildProjectorPagePayload(
+  store: InMemoryAgoraStore,
+  session: PresentationSession,
+  presentation: Presentation,
+): ProjectorPagePayload {
+  const controller = buildPresenterController(store, session, presentation);
+  return {
+    sessionId: session.id,
+    slides: [...(presentation.slides || [])],
+    viewState: controller.getProjectorViewState(),
+  };
+}
+
+function renderPresenterPageFragment(payload: PresenterPagePayload): string {
+  return `${renderPresenterViewHtml(payload.viewState)}
+<script id="agora-page-state" type="application/json">${serializeInlineJson(payload)}</script>`;
+}
+
+function renderProjectorPageFragment(payload: ProjectorPagePayload): string {
+  return `${renderProjectorViewHtml(payload.viewState)}
+<script id="agora-page-state" type="application/json">${serializeInlineJson(payload)}</script>`;
+}
+
+function renderPresenterPageShell(sessionId: string): string {
+  const safeSessionId = serializeInlineJson(sessionId);
+  return `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agora Presenter Console</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --color-bg: #090d16;
+        --color-surface: #131b2e;
+        --color-surface-strong: #18243a;
+        --color-border: #23314d;
+        --color-text: #f8fafc;
+        --color-muted: #94a3b8;
+        --color-primary: #3b82f6;
+        --color-danger: #ef4444;
+        --color-success: #10b981;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(circle at top, #162239 0%, #090d16 58%);
+        color: var(--color-text);
+      }
+      .page {
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+      .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        padding: 1rem 1.5rem;
+        background: rgba(9, 13, 22, 0.92);
+        border-bottom: 1px solid rgba(35, 49, 77, 0.9);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        backdrop-filter: blur(10px);
+      }
+      .page-title { margin: 0; font-size: 1.1rem; }
+      .page-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: var(--color-muted);
+        font-size: 0.95rem;
+      }
+      .page-status strong { color: var(--color-text); }
+      .status-pill {
+        display: inline-flex;
+        width: 0.75rem;
+        height: 0.75rem;
+        border-radius: 999px;
+        background: var(--color-success);
+      }
+      .status-pill[data-connected="false"] { background: var(--color-danger); }
+      .page-content { padding: 1rem; }
+      .presenter-console {
+        min-height: calc(100vh - 96px);
+      }
+      .console-body {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 340px;
+        gap: 1rem;
+      }
+      .slide-viewport,
+      .presenter-sidebar,
+      .suggestion-banner {
+        border: 1px solid var(--color-border);
+        border-radius: 18px;
+        background: rgba(19, 27, 46, 0.92);
+      }
+      .slide-viewport {
+        min-height: 520px;
+        padding: 2rem;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+      }
+      .slide-title-display {
+        margin: 0;
+        font-size: clamp(2rem, 4vw, 3.4rem);
+        line-height: 1.05;
+      }
+      .coordinates-indicator {
+        color: var(--color-muted);
+        margin-top: 0.75rem;
+        font-size: 0.95rem;
+      }
+      .presenter-sidebar {
+        padding: 1.25rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+      }
+      .session-join-banner,
+      .metrics-hud,
+      .session-management {
+        background: rgba(24, 36, 58, 0.9);
+        border: 1px solid rgba(35, 49, 77, 0.85);
+        border-radius: 14px;
+        padding: 1rem;
+      }
+      .metrics-hud {
+        display: grid;
+        gap: 0.85rem;
+      }
+      .metric-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 1rem;
+      }
+      .metric-label,
+      .pdf-status,
+      .qa-hint,
+      .question-meta,
+      .presenter-join-url,
+      .suggestion-content span {
+        color: var(--color-muted);
+      }
+      .metric-value {
+        font-size: 1.6rem;
+      }
+      .reactions-hud {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.65rem;
+      }
+      .reactions-hud span,
+      .btn-confirm,
+      .btn-dismiss,
+      .dpad-btn,
+      .btn-complete-session,
+      .btn-back,
+      .btn-status {
+        min-height: 44px;
+      }
+      .reactions-hud span {
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+        padding: 0.65rem;
+        border-radius: 10px;
+        background: rgba(9, 13, 22, 0.72);
+      }
+      .dpad-container {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.6rem;
+        width: 100%;
+        max-width: 220px;
+        margin: 0 auto;
+      }
+      button {
+        appearance: none;
+        border: 1px solid transparent;
+        border-radius: 12px;
+        background: var(--color-primary);
+        color: var(--color-text);
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        padding: 0.7rem 0.95rem;
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.35;
+      }
+      button:focus-visible,
+      a:focus-visible {
+        outline: 2px solid #f8fafc;
+        outline-offset: 2px;
+      }
+      .dpad-btn {
+        background: rgba(9, 13, 22, 0.8);
+        border-color: var(--color-border);
+        font-size: 1.15rem;
+      }
+      .btn-complete-session,
+      .btn-status[data-action="qa-mark-dismissed"] {
+        background: var(--color-danger);
+      }
+      .btn-status,
+      .btn-back,
+      .btn-dismiss {
+        background: rgba(9, 13, 22, 0.8);
+        border-color: var(--color-border);
+      }
+      .btn-confirm,
+      .btn-status[data-action="qa-mark-answered"] {
+        background: var(--color-success);
+      }
+      .suggestion-banner {
+        margin-bottom: 1rem;
+        padding: 1rem 1.1rem;
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        align-items: center;
+      }
+      .suggestion-actions,
+      .qa-detail-header,
+      .qa-status-controls {
+        display: flex;
+        gap: 0.6rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .qa-detail-view,
+      .qa-list-view {
+        width: min(100%, 860px);
+        margin-top: 1.25rem;
+        padding: 1rem;
+        border-radius: 14px;
+        background: rgba(9, 13, 22, 0.7);
+        border: 1px solid rgba(35, 49, 77, 0.85);
+      }
+      .question-featured h3 {
+        margin-bottom: 0.5rem;
+      }
+      .slide-static-img,
+      .presenter-qr-code {
+        max-width: 100%;
+        border-radius: 12px;
+      }
+      .session-management {
+        display: grid;
+        gap: 0.8rem;
+      }
+      .page-error {
+        margin: 1rem 0 0;
+        padding: 0.85rem 1rem;
+        border: 1px solid rgba(239, 68, 68, 0.5);
+        border-radius: 12px;
+        background: rgba(127, 29, 29, 0.3);
+        color: #fecaca;
+      }
+      a { color: #93c5fd; }
+      @media (max-width: 1024px) {
+        .console-body { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-header">
+        <div>
+          <p class="page-status"><span class="status-pill" data-connected="true" id="status-pill"></span><strong id="status-text">Connected</strong></p>
+          <h1 class="page-title">Agora Presenter Console</h1>
+        </div>
+        <p class="page-status">Use arrow keys or the directional pad to move through the deck.</p>
+      </header>
+      <main class="page-content">
+        <div id="page-root" aria-live="polite"></div>
+        <div id="page-error" class="page-error" hidden></div>
+      </main>
+    </div>
+    <script>
+      const sessionId = ${safeSessionId};
+      const presenterToken = new URLSearchParams(window.location.search).get('token') || '';
+      const statusPill = document.getElementById('status-pill');
+      const statusText = document.getElementById('status-text');
+      const root = document.getElementById('page-root');
+      const errorNode = document.getElementById('page-error');
+      let pageState = null;
+      let ws = null;
+      let retryAttempt = 0;
+      let pollIntervalId = null;
+
+      function setConnectionStatus(connected) {
+        statusPill.dataset.connected = connected ? 'true' : 'false';
+        statusText.textContent = connected ? 'Connected' : 'Reconnecting';
+      }
+
+      function showError(message) {
+        errorNode.hidden = false;
+        errorNode.textContent = message;
+      }
+
+      function clearError() {
+        errorNode.hidden = true;
+        errorNode.textContent = '';
+      }
+
+      function getFragmentUrl() {
+        const next = new URL(window.location.href);
+        next.searchParams.set('fragment', '1');
+        return next.toString();
+      }
+
+      function getHeaders() {
+        return presenterToken ? { 'x-presenter-token': presenterToken } : {};
+      }
+
+      function findTargetSlide(action) {
+        if (!pageState?.viewState) return null;
+        const { horizontalIndex, verticalIndex } = pageState.viewState;
+        if (action === 'nav-left') {
+          return pageState.slides.find((slide) => slide.horizontalIndex === horizontalIndex - 1 && slide.verticalIndex === 0) || null;
+        }
+        if (action === 'nav-right') {
+          return pageState.slides.find((slide) => slide.horizontalIndex === horizontalIndex + 1 && slide.verticalIndex === 0) || null;
+        }
+        if (action === 'nav-up') {
+          return pageState.slides.find((slide) => slide.horizontalIndex === horizontalIndex && slide.verticalIndex === verticalIndex - 1) || null;
+        }
+        if (action === 'nav-down') {
+          return pageState.slides.find((slide) => slide.horizontalIndex === horizontalIndex && slide.verticalIndex === verticalIndex + 1) || null;
+        }
+        return null;
+      }
+
+      async function refreshPage() {
+        const response = await fetch(getFragmentUrl(), { headers: getHeaders() });
+        if (!response.ok) {
+          throw new Error('Failed to refresh presenter view: ' + response.status + ' ' + response.statusText);
+        }
+        root.innerHTML = await response.text();
+        const stateNode = document.getElementById('agora-page-state');
+        pageState = stateNode ? JSON.parse(stateNode.textContent || 'null') : null;
+        clearError();
+        setConnectionStatus(true);
+      }
+
+      async function postJson(path, body) {
+        const response = await fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getHeaders() },
+          body: JSON.stringify(body || {}),
+        });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.error || ('Request failed: ' + response.status));
+        }
+        return response.json().catch(() => null);
+      }
+
+      async function handleAction(action, id) {
+        if (action === 'complete-session') {
+          await postJson('/api/v1/sessions/' + encodeURIComponent(sessionId) + '/complete', {});
+          await refreshPage();
+          return;
+        }
+        if (action === 'qa-mark-answered' || action === 'qa-mark-dismissed') {
+          const status = action === 'qa-mark-answered' ? 'answered' : 'dismissed';
+          const response = await fetch('/api/v1/sessions/' + encodeURIComponent(sessionId) + '/questions/' + encodeURIComponent(id) , {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', ...getHeaders() },
+            body: JSON.stringify({ status }),
+          });
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.error || ('Request failed: ' + response.status));
+          }
+          await refreshPage();
+          return;
+        }
+        if (action === 'qa-back') {
+          await refreshPage();
+          return;
+        }
+        const target = findTargetSlide(action);
+        if (!target) {
+          return;
+        }
+        await postJson('/api/v1/sessions/' + encodeURIComponent(sessionId) + '/slide', {
+          slideId: target.id,
+          horizontalIndex: target.horizontalIndex,
+          verticalIndex: target.verticalIndex,
+        });
+        await refreshPage();
+      }
+
+      function connectWebSocket() {
+        if (!presenterToken) {
+          setConnectionStatus(false);
+          showError('Presenter token is required to open the live presenter view.');
+          return;
+        }
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const socketUrl = protocol + '//' + window.location.host + '/api/v1/sessions/' + encodeURIComponent(sessionId) + '/ws?token=' + encodeURIComponent(presenterToken);
+        ws = new WebSocket(socketUrl);
+        ws.addEventListener('open', () => {
+          retryAttempt = 0;
+          setConnectionStatus(true);
+        });
+        ws.addEventListener('message', () => {
+          void refreshPage().catch((error) => showError(error instanceof Error ? error.message : String(error)));
+        });
+        ws.addEventListener('close', () => {
+          setConnectionStatus(false);
+          const delay = Math.min(1000 * 2 ** retryAttempt, 10000);
+          retryAttempt += 1;
+          window.setTimeout(connectWebSocket, delay);
+        });
+      }
+
+      document.addEventListener('click', (event) => {
+        const target = event.target instanceof Element ? event.target.closest('[data-action]') : null;
+        if (!target) {
+          return;
+        }
+        event.preventDefault();
+        const action = target.getAttribute('data-action');
+        const id = target.getAttribute('data-id') || '';
+        if (!action) {
+          return;
+        }
+        void handleAction(action, id).catch((error) => {
+          showError(error instanceof Error ? error.message : String(error));
+        });
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.metaKey || event.ctrlKey || event.altKey) {
+          return;
+        }
+        const activeTag = document.activeElement?.tagName;
+        if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') {
+          return;
+        }
+        const keyToAction = {
+          ArrowLeft: 'nav-left',
+          ArrowRight: 'nav-right',
+          ArrowUp: 'nav-up',
+          ArrowDown: 'nav-down',
+        };
+        const action = keyToAction[event.key];
+        if (!action) {
+          return;
+        }
+        event.preventDefault();
+        void handleAction(action, '').catch((error) => {
+          showError(error instanceof Error ? error.message : String(error));
+        });
+      });
+
+      void refreshPage().catch((error) => {
+        showError(error instanceof Error ? error.message : String(error));
+      });
+      connectWebSocket();
+      pollIntervalId = window.setInterval(() => {
+        void refreshPage().catch(() => undefined);
+      }, 5000);
+      window.addEventListener('beforeunload', () => {
+        if (pollIntervalId) {
+          window.clearInterval(pollIntervalId);
+        }
+        ws?.close();
+      });
+    </script>
+  </body>
+</html>`;
+}
+
+function renderProjectorPageShell(sessionId: string): string {
+  const safeSessionId = serializeInlineJson(sessionId);
+  return `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agora Projector View</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --color-bg: #05070d;
+        --color-surface: #0f172a;
+        --color-border: #1e293b;
+        --color-text: #f8fafc;
+        --color-muted: #94a3b8;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(circle at top, #111827 0%, #05070d 62%);
+        color: var(--color-text);
+        display: grid;
+        place-items: center;
+      }
+      main {
+        width: min(1200px, calc(100vw - 2rem));
+        min-height: calc(100vh - 2rem);
+        margin: 1rem;
+        padding: 2rem;
+        border-radius: 24px;
+        background: rgba(15, 23, 42, 0.94);
+        border: 1px solid rgba(30, 41, 59, 0.9);
+        display: grid;
+        place-items: center;
+      }
+      .projector-display,
+      .projector-qa-slide,
+      .projector-slide-content {
+        width: 100%;
+      }
+      .projector-slide-content {
+        min-height: 70vh;
+        display: grid;
+        place-items: center;
+        text-align: center;
+      }
+      .projector-slide-content h1,
+      .projector-qa-slide h2 {
+        font-size: clamp(2.4rem, 6vw, 5rem);
+        line-height: 1.05;
+        margin: 0 0 1.5rem;
+      }
+      .projector-questions-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 1rem;
+      }
+      .projector-question-item {
+        display: grid;
+        grid-template-columns: 120px 1fr;
+        gap: 1rem;
+        align-items: center;
+        padding: 1rem 1.25rem;
+        border-radius: 16px;
+        border: 1px solid rgba(30, 41, 59, 0.9);
+        background: rgba(5, 7, 13, 0.56);
+      }
+      .q-votes {
+        font-size: 1.4rem;
+        color: #93c5fd;
+      }
+      .q-text {
+        font-size: clamp(1.2rem, 2.4vw, 2rem);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div id="page-root" aria-live="polite"></div>
+    </main>
+    <script>
+      const sessionId = ${safeSessionId};
+      const root = document.getElementById('page-root');
+      let ws = null;
+      let retryAttempt = 0;
+
+      function getFragmentUrl() {
+        const next = new URL(window.location.href);
+        next.searchParams.set('fragment', '1');
+        return next.toString();
+      }
+
+      async function refreshPage() {
+        const response = await fetch(getFragmentUrl());
+        if (!response.ok) {
+          throw new Error('Failed to refresh projector view: ' + response.status + ' ' + response.statusText);
+        }
+        root.innerHTML = await response.text();
+      }
+
+      function connectWebSocket() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const socketUrl = protocol + '//' + window.location.host + '/api/v1/sessions/' + encodeURIComponent(sessionId) + '/ws';
+        ws = new WebSocket(socketUrl);
+        ws.addEventListener('open', () => {
+          retryAttempt = 0;
+        });
+        ws.addEventListener('message', () => {
+          void refreshPage().catch(() => undefined);
+        });
+        ws.addEventListener('close', () => {
+          const delay = Math.min(1000 * 2 ** retryAttempt, 10000);
+          retryAttempt += 1;
+          window.setTimeout(connectWebSocket, delay);
+        });
+      }
+
+      void refreshPage().catch(() => undefined);
+      connectWebSocket();
+      window.setInterval(() => {
+        void refreshPage().catch(() => undefined);
+      }, 5000);
+      window.addEventListener('beforeunload', () => ws?.close());
+    </script>
+  </body>
+</html>`;
+}
+
 export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
   const adminSecret = options?.adminToken ?? 'agora-admin-secret-token';
   const allowedOrigins = options?.allowedOrigins ?? ['*'];
@@ -503,14 +1236,14 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     return token === adminSecret;
   }
 
-  function authorizePresenter(request: Request, sessionId: string): boolean {
+  function authorizePresenter(
+    request: Request,
+    sessionId: string,
+    explicitToken?: string | null,
+  ): boolean {
     if (authorizeAdmin(request)) return true;
 
-    const authHeader = request.headers.get('Authorization');
-    const customHeader = request.headers.get('x-presenter-token');
-    const token = authHeader?.startsWith('Bearer ')
-      ? authHeader.slice(7).trim()
-      : customHeader?.trim();
+    const token = getPresenterToken(request, explicitToken);
 
     const expectedToken = store.presenterTokens.get(sessionId);
     return Boolean(token && expectedToken && token === expectedToken);
@@ -1042,6 +1775,53 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         status: 200,
         headers: { 'Content-Type': 'text/html; charset=utf-8' },
       });
+    }
+
+    const presenterPageMatch = path.match(/^\/presenter\/([^/]+)$/);
+    if (method === 'GET' && presenterPageMatch) {
+      const sessionId = presenterPageMatch[1]!;
+      const session = await hydrateSessionFromDO(env, sessionId);
+      if (!session) {
+        return errorResponse('Session not found', 404);
+      }
+
+      const presenterToken = url.searchParams.get('token');
+      if (!authorizePresenter(request, sessionId, presenterToken)) {
+        return errorResponse('Unauthorized: Presenter authentication required', 403);
+      }
+
+      const presentation = await hydratePresentationFromD1(env, session.presentationId);
+      if (!presentation) {
+        return errorResponse('Presentation not found', 404);
+      }
+
+      const payload = buildPresenterPagePayload(store, session, presentation);
+      if (url.searchParams.get('fragment') === '1') {
+        return htmlResponse(renderPresenterPageFragment(payload));
+      }
+
+      return htmlResponse(renderPresenterPageShell(sessionId));
+    }
+
+    const projectorPageMatch = path.match(/^\/projector\/([^/]+)$/);
+    if (method === 'GET' && projectorPageMatch) {
+      const sessionId = projectorPageMatch[1]!;
+      const session = await hydrateSessionFromDO(env, sessionId);
+      if (!session) {
+        return errorResponse('Session not found', 404);
+      }
+
+      const presentation = await hydratePresentationFromD1(env, session.presentationId);
+      if (!presentation) {
+        return errorResponse('Presentation not found', 404);
+      }
+
+      const payload = buildProjectorPagePayload(store, session, presentation);
+      if (url.searchParams.get('fragment') === '1') {
+        return htmlResponse(renderProjectorPageFragment(payload));
+      }
+
+      return htmlResponse(renderProjectorPageShell(sessionId));
     }
 
     // 0. GET /api/v1/presentations (List all presentations)
