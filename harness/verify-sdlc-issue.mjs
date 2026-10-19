@@ -39,7 +39,7 @@ export function extractIssueReferences(text) {
 
   // Pattern 1: Closing & contextual keywords (e.g., Fixes #123, Closes #45, Resolves #67)
   const keywordRegex =
-    /\b(?:fixes|fixed|close[sd]?|resolve[sd]?|issue|ref|refs|for|towards)\s+#(\d+)\b/gi;
+    /\b(?:fixes|fixed|close[sd]?|resolve[sd]?|issue|ref|refs|for|towards|related\s+to)\s+#(\d+)\b/gi;
   for (const match of text.matchAll(keywordRegex)) {
     if (match[1]) {
       issueNumbers.add(Number.parseInt(match[1], 10));
@@ -62,7 +62,9 @@ export function extractIssueReferences(text) {
     }
   }
 
-  return Array.from(issueNumbers).filter((n) => Number.isInteger(n) && n > 0);
+  return Array.from(issueNumbers)
+    .filter((n) => Number.isInteger(n) && n > 0)
+    .sort((a, b) => a - b);
 }
 
 /**
