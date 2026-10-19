@@ -5,7 +5,9 @@ allowBuilds:
   '@biomejs/biome': true
   esbuild: true
   puppeteer: false
+  workerd: true
 onlyBuiltDependencies:
   - "@biomejs/biome"
   - "esbuild"
+  - "workerd"
 minimumReleaseAge: 0

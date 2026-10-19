@@ -27,6 +27,8 @@
     "commitlint": "node harness/verify-commit-msg.mjs --last",
     "cf:emulate": "node infrastructure/cloudflare/local-emulate-check.mjs",
     "cf:provision": "node infrastructure/cloudflare/provision.mjs",
+    "cf:migrate": "wrangler d1 migrations apply DB --remote --cwd infrastructure/cloudflare",
+    "cf:deploy": "wrangler deploy --cwd infrastructure/cloudflare",
     "harness:validate": "node harness/validate-harness.mjs",
     "harness:arch": "node harness/verify-architecture.mjs",
     "harness:victory": "node harness/victory-detector.mjs",
@@ -44,6 +46,7 @@
     "mermaid": "^12.2.0",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.71.2",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "wrangler": "^4.151.1"
   }
 }

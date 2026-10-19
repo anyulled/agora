@@ -429,6 +429,27 @@
   - `pnpm run harness:victory`: 🏆 VICTORY DETECTED (All 3 termination layers verified successfully).
   - GitHub Actions: PR #43 checks all green (Run ID `39230431052`).
 
+---
+
+## Session 020 — 2026-10-19
+- **Role**: Cloudflare CD & Monorepo Build Automation Engineer
+- **Goals**:
+  1. Fix failed Cloudflare CD deployment job (`run 39227501310 / job 117980977726`).
+  2. Eliminate `wrangler-action` npm crash (`Cannot read properties of null (reading 'edgesOut')`).
+  3. Install `wrangler` cleanly into monorepo devDependencies with `workerd` build approval in `pnpm-workspace.yaml`.
+  4. Use native `pnpm exec wrangler` for remote D1 migrations and Worker deployment in `.github/workflows/deploy.yml`.
+- **Completed**:
+  - Identified root cause in `wrangler-action`: in monorepos with subdirectories lacking `package.json`, `wrangler-action` falls back to `npm i wrangler@3.90.0`, crashing npm's arborist on pnpm symlinked virtual stores.
+  - Installed `wrangler: ^4.151.1` as root devDependency, configured `workerd: true` under `allowBuilds` and `onlyBuiltDependencies` in `pnpm-workspace.yaml`.
+  - Added npm scripts `"cf:migrate"` and `"cf:deploy"` in root `package.json`.
+  - Updated `.github/workflows/deploy.yml` to execute `pnpm exec wrangler d1 migrations apply DB --remote --cwd infrastructure/cloudflare` and `pnpm exec wrangler deploy --cwd infrastructure/cloudflare`.
+  - Verified local migration execution (`0001_initial.sql`), dry-run deployment bundling (`pnpm exec wrangler deploy --dry-run`), and canonical `./init.sh` (14/14 test suites, 183 tests passing).
+- **Verification Evidence**:
+  - `pnpm exec wrangler deploy --dry-run --cwd infrastructure/cloudflare`: Bundles Worker cleanly with all bindings (SESSION_COORDINATOR, DB, ASSETS_BUCKET, ENVIRONMENT, ADMIN_TOKEN).
+  - `./init.sh`: 14/14 test suites (183 tests) passing.
+  - `pnpm run harness:victory`: 🏆 VICTORY DETECTED (All 3 termination layers verified successfully).
+
+
 
 
 
