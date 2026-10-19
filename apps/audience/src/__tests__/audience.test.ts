@@ -509,14 +509,17 @@ describe('AudienceAppController (SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-00
 
   describe('Questions and Upvoting (SPEC-006, SPEC-007)', () => {
     it('submits a slide-scoped question and lists it sorted by votes', () => {
-      audience.submitQuestion('How is state synchronized?', 'Alice');
+      const qAlice = audience.submitQuestion('How is state synchronized?', 'Alice');
       audience.submitQuestion('What about offline support?', 'Bob');
+      audience.toggleUpvoteQuestion(qAlice.id);
 
       const questions = audience.getQuestionsForActiveSlide();
       expect(questions).toHaveLength(2);
       expect(questions[0]?.content).toBe('How is state synchronized?');
       expect(questions[0]?.participantName).toBe('Alice');
-      expect(questions[0]?.upvotes).toBe(0);
+      expect(questions[0]?.upvotes).toBe(1);
+      expect(questions[1]?.participantName).toBe('Bob');
+      expect(questions[1]?.upvotes).toBe(0);
     });
 
     it('enforces one upvote per participant and allows retracting (SPEC-007)', () => {
