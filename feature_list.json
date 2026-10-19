@@ -285,19 +285,26 @@
       "user_visible_behavior": "Slide with data-component='audience-qa' renders a ranked list view of questions with votes and statuses. Clicking a question enters detail view showing the question text and pre-rendered slide image without navigating Reveal.js away from Q&A slide. Escape/Back returns to list view.",
       "status": "passing",
       "verification": [
-        "vitest run packages/reveal-plugin/tests/qa-slide.test.ts",
-        "vitest run tests/e2e/qa-slide-navigation.test.ts"
+        "pnpm vitest run packages/reveal-plugin/src/__tests__/reveal-plugin.test.ts",
+        "pnpm vitest run tests/e2e/e2e-flows.test.ts"
       ],
       "evidence": [
         {
           "type": "unit_test",
-          "target": "packages/reveal-plugin/tests/qa-slide.test.ts",
-          "timestamp": "2026-10-18T20:44:42Z",
+          "target": "packages/reveal-plugin/src/__tests__/reveal-plugin.test.ts",
+          "timestamp": "2026-10-19T10:41:40Z",
           "result": "passed",
-          "assertions": 12
+          "assertions": 14
+        },
+        {
+          "type": "integration_test",
+          "target": "tests/e2e/e2e-flows.test.ts",
+          "timestamp": "2026-10-19T10:41:40Z",
+          "result": "passed",
+          "assertions": 1
         }
       ],
-      "notes": "Detail view strictly keeps Reveal.js on Q&A slide; informative fallback if image missing."
+      "notes": "Includes data-component='audience-qa' slide detection and mounting, ranked question list view by votes, submitter name and Anonymous fallback, slide title resolution, status badges (pending/answered/dismissed), scroll position preservation during live WebSocket updates (question.submitted, question.upvoted, question.updated), internal detail view keeping Reveal.js coordinates unchanged (deck.slide not called), slide PNG download URL with image error graceful fallback, presenter Mark as Answered PATCH API action, and keyboard Escape/Back button interception preventing slide navigation."
     },
     {
       "id": "SPEC-009",

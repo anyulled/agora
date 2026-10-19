@@ -319,6 +319,40 @@
   - `pnpm test`, `./init.sh`, and `pnpm run verify`: 13/13 test suites (162 tests) passing, 0 ESLint warnings, 0 typecheck errors, 1.5% code duplication (`<= 10%`).
   - `pnpm run harness:victory`: 🏆 Victory Detected (Layer 1, Layer 2, Layer 3 passing).
 
+---
+
+## Session 016 — 2026-10-19
+- **Role**: Embedded Q&A Slide & Presentation Sync Engineer (`#14 SPEC-008`, `#15 SPEC-008a`, `#16 SPEC-008b`)
+- **Goals**:
+  1. Implement `#14 SPEC-008: Embedded Q&A slide` and its decomposed sub-issues:
+     - `#15 SPEC-008a`: `data-component="audience-qa"` slide component, ranked question list view by votes, submitter name / Anonymous, referenced slide title, status badge (`pending` | `answered` | `dismissed`), and live updates without jumping scroll position.
+     - `#16 SPEC-008b`: Question detail view with referenced slide snapshot fallback, Escape key / UI Back button return handling with event isolation, and presenter "Mark as Answered" action.
+  2. Maintain Reveal.js coordinate invariant: detail view inspections and Escape/Back navigations strictly do NOT alter Reveal.js coordinates (`deck.slide` is NOT called).
+  3. Verify against 14-Practice Harness, clean architecture, code duplication <= 10%, Biome/ESLint format/lint, and close issues #14, #15, #16.
+- **Completed**:
+  - Enhanced `QaSlideController` in `packages/reveal-plugin/src/index.ts`:
+    - Added `QaSlideControllerOptions` (`presenterToken`, `fetchFn`, `slideTitles`, `onMarkAnswered`).
+    - Added `injectQaStylesOnce` providing high-contrast large-screen presentation styling (WCAG 2.2 AA compliant) for conference projectors.
+    - Added `setSlideTitles` and `getSlideTitle` for slide title lookup.
+    - Added `loadQuestions` via `GET /api/v1/sessions/:id/questions?sortBy=votes&order=desc`.
+    - Added `markAnswered` with optimistic UI update and `PATCH /api/v1/sessions/:id/questions/:questionId` execution.
+    - Added `handleRealtimeEvent` processing `question.submitted`, `question.upvoted`, and `question.updated`.
+    - Added `renderPreservingScroll` to preserve scroll position during live incoming updates.
+    - In ranked list view: rendered vote badges (`.qa-votes-badge`), status badges (`.qa-status-badge`), referenced slide titles (`.qa-referenced-slide`), submitter names (`.qa-submitter-name`), and question text (`.qa-question-text`).
+    - In detail view: rendered question metadata, large legible question typography (`.qa-detail-question-text`), presenter "Mark as Answered" button (`.qa-mark-answered-btn`), referenced slide PNG snapshot (`.qa-slide-preview-image`), and graceful fallback placeholder (`.qa-slide-fallback`) when image errors.
+    - Handled keyboard events: `Escape` intercepts cleanly with `preventDefault()` and `stopPropagation()` returning to list view and restoring scroll position.
+  - Enhanced `RevealAudiencePlugin` in `packages/reveal-plugin/src/index.ts`:
+    - Extracted slide titles dictionary from Reveal deck slides via `collectSlideTitles()`.
+    - Passed options and slide titles to `QaSlideController`.
+    - Forwarded real-time WebSocket events (`question.submitted`, `question.upvoted`, `question.updated`) to `QaSlideController`.
+    - On slide change to `data-component="audience-qa"` slide, mounts `QaSlideController` and loads active questions.
+  - Added comprehensive test suites in `packages/reveal-plugin/src/__tests__/reveal-plugin.test.ts` (14/14 tests passing).
+  - Closed GitHub issues #15 (`SPEC-008a`), #16 (`SPEC-008b`), and #14 (`SPEC-008`).
+- **Verification Evidence**:
+  - `pnpm test`, `./init.sh`, and `pnpm run verify`: 13/13 test suites (166 tests) passing, 0 ESLint warnings, 0 typecheck errors, 1.6% code duplication (`<= 10%`).
+  - `pnpm run harness:victory`: 🏆 Victory Detected (Layer 1, Layer 2, Layer 3 passing).
+
+
 
 
 

@@ -95,17 +95,205 @@ export function extractSlideMetadata(
   };
 }
 
+export interface QaSlideControllerOptions {
+  presenterToken?: string;
+  fetchFn?: typeof fetch;
+  slideTitles?: Record<string, string>;
+  onMarkAnswered?: (questionId: string) => Promise<void> | void;
+}
+
+export function injectQaStylesOnce(): void {
+  if (typeof document === 'undefined' || !document.head?.appendChild) return;
+  if (typeof document.getElementById === 'function' && document.getElementById('agora-qa-styles')) {
+    return;
+  }
+  try {
+    const styleEl = document.createElement('style');
+    styleEl.setAttribute('id', 'agora-qa-styles');
+    styleEl.textContent = `
+      .qa-list-view, .qa-detail-view {
+        box-sizing: border-box;
+        width: 100%;
+        height: 100%;
+        max-height: 80vh;
+        overflow-y: auto;
+        padding: 1.5rem;
+        background: #0f172a;
+        color: #f8fafc;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        border-radius: 12px;
+        text-align: left;
+      }
+      .qa-header {
+        font-size: 2.2rem;
+        margin-bottom: 1.5rem;
+        color: #38bdf8;
+        border-bottom: 2px solid #1e293b;
+        padding-bottom: 0.5rem;
+      }
+      .qa-empty-msg {
+        font-size: 1.5rem;
+        color: #94a3b8;
+        font-style: italic;
+      }
+      .qa-question-items {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      .qa-question-card {
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 1.25rem;
+        cursor: pointer;
+        transition: background 0.15s ease, border-color 0.15s ease;
+      }
+      .qa-question-card:hover {
+        background: #334155;
+        border-color: #38bdf8;
+      }
+      .qa-card-meta {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 0.75rem;
+        font-size: 1rem;
+      }
+      .qa-votes-badge {
+        background: #0284c7;
+        color: #ffffff;
+        padding: 0.2rem 0.6rem;
+        border-radius: 9999px;
+        font-weight: 700;
+        font-size: 1.1rem;
+      }
+      .qa-status-badge {
+        padding: 0.2rem 0.5rem;
+        border-radius: 4px;
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 0.85rem;
+      }
+      .qa-status-pending {
+        background: #eab308;
+        color: #0f172a;
+      }
+      .qa-status-answered {
+        background: #22c55e;
+        color: #0f172a;
+      }
+      .qa-status-dismissed {
+        background: #64748b;
+        color: #f8fafc;
+      }
+      .qa-referenced-slide {
+        background: #0f172a;
+        border: 1px solid #475569;
+        padding: 0.2rem 0.5rem;
+        border-radius: 4px;
+        color: #cbd5e1;
+        font-size: 0.9rem;
+      }
+      .qa-submitter-name {
+        color: #94a3b8;
+        font-size: 0.95rem;
+      }
+      .qa-question-text {
+        font-size: 1.4rem;
+        line-height: 1.4;
+        margin: 0;
+        color: #f1f5f9;
+      }
+      .qa-back-btn {
+        background: #334155;
+        color: #f8fafc;
+        border: 1px solid #475569;
+        padding: 0.6rem 1.2rem;
+        border-radius: 6px;
+        font-size: 1.1rem;
+        font-weight: 600;
+        cursor: pointer;
+        margin-bottom: 1.5rem;
+      }
+      .qa-back-btn:hover {
+        background: #475569;
+      }
+      .qa-detail-question-box {
+        background: #1e293b;
+        padding: 1.5rem;
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
+        border-left: 6px solid #38bdf8;
+      }
+      .qa-detail-question-text {
+        font-size: 2rem;
+        line-height: 1.35;
+        margin: 1rem 0;
+        color: #f8fafc;
+      }
+      .qa-mark-answered-btn {
+        background: #16a34a;
+        color: #ffffff;
+        border: none;
+        padding: 0.6rem 1.25rem;
+        border-radius: 6px;
+        font-size: 1.1rem;
+        font-weight: 700;
+        cursor: pointer;
+        margin-top: 0.5rem;
+      }
+      .qa-mark-answered-btn:hover {
+        background: #22c55e;
+      }
+      .qa-slide-preview-container {
+        background: #020617;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 1rem;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 240px;
+      }
+      .qa-slide-preview-image {
+        max-width: 100%;
+        max-height: 48vh;
+        object-fit: contain;
+        border-radius: 4px;
+      }
+      .qa-slide-fallback {
+        font-size: 1.3rem;
+        color: #94a3b8;
+        padding: 2rem;
+        text-align: center;
+        font-style: italic;
+      }
+    `;
+    document.head.appendChild(styleEl);
+  } catch {
+    // Ignore in non-standard DOM environments
+  }
+}
+
 export class QaSlideController {
   private viewMode: 'list' | 'detail' = 'list';
   private selectedQuestion: AudienceQuestion | null = null;
   private scrollPosition = 0;
   private questions: AudienceQuestion[] = [];
   private containerElement: HTMLElement | null = null;
+  private slideTitles: Record<string, string> = {};
 
   constructor(
     private readonly sessionId: string,
     private readonly endpoint: string,
-  ) {}
+    private readonly options?: QaSlideControllerOptions,
+  ) {
+    if (options?.slideTitles) {
+      this.slideTitles = { ...options.slideTitles };
+    }
+  }
 
   public getViewMode(): 'list' | 'detail' {
     return this.viewMode;
@@ -115,9 +303,43 @@ export class QaSlideController {
     return this.selectedQuestion;
   }
 
+  public getQuestions(): AudienceQuestion[] {
+    return [...this.questions];
+  }
+
+  public setSlideTitles(titles: Record<string, string>): void {
+    this.slideTitles = { ...this.slideTitles, ...titles };
+    this.renderPreservingScroll();
+  }
+
+  public getSlideTitle(slideId: string): string {
+    return this.slideTitles[slideId] || `Slide ${slideId}`;
+  }
+
   public setQuestions(questions: AudienceQuestion[]): void {
-    this.questions = questions;
-    this.render();
+    this.questions = [...questions];
+    this.renderPreservingScroll();
+  }
+
+  public async loadQuestions(): Promise<AudienceQuestion[]> {
+    const fetchImpl = this.options?.fetchFn ?? (typeof fetch !== 'undefined' ? fetch : null);
+    if (!fetchImpl) return this.questions;
+
+    try {
+      const res = await fetchImpl(
+        `${this.endpoint}/api/v1/sessions/${encodeURIComponent(this.sessionId)}/questions?sortBy=votes&order=desc`,
+      );
+      if (res.ok) {
+        const data = (await res.json()) as AudienceQuestion[];
+        if (Array.isArray(data)) {
+          this.questions = data;
+          this.renderPreservingScroll();
+        }
+      }
+    } catch {
+      // Offline fallback
+    }
+    return this.questions;
   }
 
   public selectQuestion(questionId: string): void {
@@ -151,9 +373,95 @@ export class QaSlideController {
     return false;
   }
 
+  public async markAnswered(questionId: string): Promise<void> {
+    const q = this.questions.find((item) => item.id === questionId);
+    if (!q) return;
+
+    q.status = 'answered';
+    if (this.selectedQuestion?.id === questionId) {
+      this.selectedQuestion.status = 'answered';
+    }
+    this.renderPreservingScroll();
+
+    if (this.options?.onMarkAnswered) {
+      await this.options.onMarkAnswered(questionId);
+      return;
+    }
+
+    const token = this.options?.presenterToken;
+    const fetchImpl = this.options?.fetchFn ?? (typeof fetch !== 'undefined' ? fetch : null);
+    if (token && fetchImpl) {
+      try {
+        await fetchImpl(
+          `${this.endpoint}/api/v1/sessions/${encodeURIComponent(this.sessionId)}/questions/${encodeURIComponent(questionId)}`,
+          {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+              'x-presenter-token': token,
+            },
+            body: JSON.stringify({ status: 'answered' }),
+          },
+        );
+      } catch {
+        // Offline resilience
+      }
+    }
+  }
+
+  public handleRealtimeEvent(type: string, payload: unknown): void {
+    if (!payload || typeof payload !== 'object') return;
+    const p = payload as Record<string, unknown>;
+
+    if (type === 'question.submitted') {
+      const q = p as unknown as AudienceQuestion;
+      if (q?.id) {
+        this.questions = this.questions.filter((item) => item.id !== q.id).concat(q);
+      }
+    } else if (type === 'question.updated') {
+      const q = p as unknown as AudienceQuestion;
+      const existing = this.questions.find((item) => item.id === q?.id);
+      if (existing) {
+        Object.assign(existing, q);
+        if (this.selectedQuestion?.id === q.id) {
+          this.selectedQuestion = { ...existing };
+        }
+      }
+    } else if (type === 'question.upvoted') {
+      const qId = String(p.questionId ?? p.id ?? '');
+      const votes =
+        typeof p.voteCount === 'number'
+          ? p.voteCount
+          : typeof p.upvotes === 'number'
+            ? p.upvotes
+            : null;
+      const existing = this.questions.find((item) => item.id === qId);
+      if (existing && votes !== null) {
+        existing.upvotes = votes;
+        if (this.selectedQuestion?.id === qId) {
+          this.selectedQuestion.upvotes = votes;
+        }
+      }
+    }
+
+    this.renderPreservingScroll();
+  }
+
   public mount(container: HTMLElement): void {
     this.containerElement = container;
+    injectQaStylesOnce();
     this.render();
+  }
+
+  public renderPreservingScroll(): void {
+    const prevScroll = this.containerElement
+      ? this.containerElement.scrollTop
+      : this.scrollPosition;
+    this.render();
+    if (this.containerElement && this.viewMode === 'list') {
+      this.containerElement.scrollTop = prevScroll;
+    }
   }
 
   public render(): void {
@@ -167,6 +475,7 @@ export class QaSlideController {
       listWrapper.className = 'qa-list-view';
 
       const header = document.createElement('h2');
+      header.className = 'qa-header';
       header.textContent = 'Audience Q&A';
       listWrapper.appendChild(header);
 
@@ -179,21 +488,46 @@ export class QaSlideController {
         emptyMsg.textContent = 'No audience questions yet.';
         itemsContainer.appendChild(emptyMsg);
       } else {
-        const sorted = [...this.questions].sort((a, b) => b.upvotes - a.upvotes);
+        const sorted = [...this.questions].sort((a, b) => {
+          if (b.upvotes !== a.upvotes) {
+            return b.upvotes - a.upvotes;
+          }
+          return (a.createdAt || '').localeCompare(b.createdAt || '');
+        });
+
         for (const q of sorted) {
           const item = document.createElement('div');
           item.className = 'qa-question-card';
           item.setAttribute('data-question-id', q.id);
 
+          const metaRow = document.createElement('div');
+          metaRow.className = 'qa-card-meta';
+
           const upvotesBadge = document.createElement('span');
           upvotesBadge.className = 'qa-votes-badge';
           upvotesBadge.textContent = `▲ ${q.upvotes}`;
+          metaRow.appendChild(upvotesBadge);
+
+          const statusBadge = document.createElement('span');
+          statusBadge.className = `qa-status-badge qa-status-${q.status}`;
+          statusBadge.textContent = q.status;
+          metaRow.appendChild(statusBadge);
+
+          const slideBadge = document.createElement('span');
+          slideBadge.className = 'qa-referenced-slide';
+          slideBadge.textContent = this.getSlideTitle(q.slideId);
+          metaRow.appendChild(slideBadge);
+
+          const submitter = document.createElement('span');
+          submitter.className = 'qa-submitter-name';
+          submitter.textContent = q.participantName || 'Anonymous';
+          metaRow.appendChild(submitter);
+
+          item.appendChild(metaRow);
 
           const content = document.createElement('p');
           content.className = 'qa-question-text';
           content.textContent = q.content;
-
-          item.appendChild(upvotesBadge);
           item.appendChild(content);
 
           item.addEventListener('click', () => {
@@ -207,6 +541,7 @@ export class QaSlideController {
       listWrapper.appendChild(itemsContainer);
       this.containerElement.appendChild(listWrapper);
     } else if (this.viewMode === 'detail' && this.selectedQuestion) {
+      const q = this.selectedQuestion;
       const detailWrapper = document.createElement('div');
       detailWrapper.className = 'qa-detail-view';
 
@@ -215,8 +550,8 @@ export class QaSlideController {
       backBtn.type = 'button';
       backBtn.textContent = '← Back to Questions (Esc)';
       backBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+        (e as { preventDefault?: () => void })?.preventDefault?.();
+        (e as { stopPropagation?: () => void })?.stopPropagation?.();
         this.backToList();
       });
       detailWrapper.appendChild(backBtn);
@@ -224,16 +559,47 @@ export class QaSlideController {
       const questionBox = document.createElement('div');
       questionBox.className = 'qa-detail-question-box';
 
+      const metaRow = document.createElement('div');
+      metaRow.className = 'qa-card-meta';
+
       const votes = document.createElement('span');
       votes.className = 'qa-votes-badge';
-      votes.textContent = `▲ ${this.selectedQuestion.upvotes} upvotes`;
+      votes.textContent = `▲ ${q.upvotes} upvotes`;
+      metaRow.appendChild(votes);
+
+      const statusBadge = document.createElement('span');
+      statusBadge.className = `qa-status-badge qa-status-${q.status}`;
+      statusBadge.textContent = q.status;
+      metaRow.appendChild(statusBadge);
+
+      const slideBadge = document.createElement('span');
+      slideBadge.className = 'qa-referenced-slide';
+      slideBadge.textContent = this.getSlideTitle(q.slideId);
+      metaRow.appendChild(slideBadge);
+
+      const submitter = document.createElement('span');
+      submitter.className = 'qa-submitter-name';
+      submitter.textContent = `Asked by: ${q.participantName || 'Anonymous'}`;
+      metaRow.appendChild(submitter);
+
+      questionBox.appendChild(metaRow);
 
       const text = document.createElement('h3');
       text.className = 'qa-detail-question-text';
-      text.textContent = this.selectedQuestion.content;
-
-      questionBox.appendChild(votes);
+      text.textContent = q.content;
       questionBox.appendChild(text);
+
+      if (this.options?.presenterToken || this.options?.onMarkAnswered) {
+        const markAnsweredBtn = document.createElement('button');
+        markAnsweredBtn.className = 'qa-mark-answered-btn';
+        markAnsweredBtn.type = 'button';
+        markAnsweredBtn.textContent = q.status === 'answered' ? 'Answered ✓' : 'Mark as Answered';
+        markAnsweredBtn.addEventListener('click', () => {
+          void this.markAnswered(q.id);
+        });
+        questionBox.appendChild(markAnsweredBtn);
+      }
+
       detailWrapper.appendChild(questionBox);
 
       const slidePreviewContainer = document.createElement('div');
@@ -241,8 +607,8 @@ export class QaSlideController {
 
       const img = document.createElement('img');
       img.className = 'qa-slide-preview-image';
-      img.alt = `Slide ${this.selectedQuestion.slideId}`;
-      img.src = `${this.endpoint}/api/v1/sessions/${this.sessionId}/slides/${this.selectedQuestion.slideId}/download`;
+      img.alt = `Slide ${q.slideId}`;
+      img.src = `${this.endpoint}/api/v1/sessions/${encodeURIComponent(this.sessionId)}/slides/${encodeURIComponent(q.slideId)}/download`;
 
       const fallback = document.createElement('div');
       fallback.className = 'qa-slide-fallback';
@@ -252,6 +618,11 @@ export class QaSlideController {
       img.addEventListener('error', () => {
         img.style.display = 'none';
         fallback.style.display = 'block';
+      });
+
+      img.addEventListener('load', () => {
+        img.style.display = 'block';
+        fallback.style.display = 'none';
       });
 
       slidePreviewContainer.appendChild(img);
@@ -299,8 +670,12 @@ export class RevealAudiencePlugin implements RevealPlugin {
       return;
     }
 
-    const { sessionId, endpoint } = this.config;
-    this.qaController = new QaSlideController(sessionId, endpoint);
+    const { sessionId, endpoint, presenterToken, fetchFn } = this.config;
+    this.qaController = new QaSlideController(sessionId, endpoint, {
+      presenterToken,
+      fetchFn,
+      slideTitles: this.collectSlideTitles(),
+    });
 
     if (typeof window !== 'undefined') {
       this.keydownListener = (event: KeyboardEvent) => {
@@ -348,6 +723,21 @@ export class RevealAudiencePlugin implements RevealPlugin {
 
   public getQaController(): QaSlideController | null {
     return this.qaController;
+  }
+
+  public collectSlideTitles(): Record<string, string> {
+    const titles: Record<string, string> = {};
+    const slides = this.deck?.getSlides?.() ?? [];
+    for (let i = 0; i < slides.length; i++) {
+      const el = slides[i];
+      if (!el) continue;
+      const coords = this.deck?.getIndices?.(el) ?? { h: i, v: 0 };
+      const meta = extractSlideMetadata(el, coords.h, coords.v);
+      if (meta.id) {
+        titles[meta.id] = meta.title;
+      }
+    }
+    return titles;
   }
 
   public getCurrentSlideMetadata(): SlideMetadataExtract | null {
@@ -509,6 +899,12 @@ export class RevealAudiencePlugin implements RevealPlugin {
             ? parsed.payload.currentSlideId
             : undefined;
         this.reconcileSlidePosition(slideId, undefined, undefined);
+      } else if (
+        parsed.type === 'question.submitted' ||
+        parsed.type === 'question.upvoted' ||
+        parsed.type === 'question.updated'
+      ) {
+        this.qaController?.handleRealtimeEvent(parsed.type, parsed.payload);
       }
     } catch {
       // Ignore malformed WebSocket frames
@@ -610,7 +1006,9 @@ export class RevealAudiencePlugin implements RevealPlugin {
           ? (currentSlide as HTMLElement)
           : (currentSlide.querySelector('[data-component="audience-qa"]') as HTMLElement);
       if (target) {
+        this.qaController.setSlideTitles(this.collectSlideTitles());
         this.qaController.mount(target);
+        void this.qaController.loadQuestions();
       }
     }
 

@@ -565,4 +565,306 @@ describe('QaSlideController and Q&A transitions', () => {
     expect(qa.getViewMode()).toBe('list');
     expect(qa.getSelectedQuestion()).toBeNull();
   });
+
+  it('renders ranked question list view with vote badges, submitter names, slide titles, and status badges (SPEC-008a)', () => {
+    const qa = new QaSlideController('session-123', 'https://api.agora.test', {
+      slideTitles: {
+        'slide-arch': 'System Architecture',
+        'slide-db': 'SQLite Durability',
+      },
+    });
+    const container = document.createElement('div');
+    qa.mount(container as unknown as HTMLElement);
+
+    qa.setQuestions([
+      {
+        id: 'q1',
+        sessionId: 'session-123',
+        slideId: 'slide-arch',
+        participantId: 'p1',
+        participantName: 'Alice',
+        content: 'Why D1 over traditional PostgreSQL?',
+        status: 'pending',
+        upvotes: 10,
+        createdAt: '2026-10-19T10:00:00.000Z',
+      },
+      {
+        id: 'q2',
+        sessionId: 'session-123',
+        slideId: 'slide-db',
+        participantId: 'p2',
+        // Omitted participantName to verify "Anonymous" fallback
+        content: 'What is the R2 cache invalidation latency?',
+        status: 'answered',
+        upvotes: 25,
+        createdAt: '2026-10-19T10:01:00.000Z',
+      },
+    ]);
+
+    const cards = container.querySelectorAll('.qa-question-card');
+    expect(cards.length).toBe(2);
+
+    // Highest votes (q2 with 25 upvotes) ranks first
+    const firstCard = cards[0]!;
+    expect(firstCard.getAttribute('data-question-id')).toBe('q2');
+    expect(firstCard.querySelector('.qa-votes-badge')?.textContent).toBe('▲ 25');
+    expect(firstCard.querySelector('.qa-status-badge')?.textContent).toBe('answered');
+    expect(firstCard.querySelector('.qa-referenced-slide')?.textContent).toBe('SQLite Durability');
+    expect(firstCard.querySelector('.qa-submitter-name')?.textContent).toBe('Anonymous');
+
+    // Second card (q1 with 10 upvotes)
+    const secondCard = cards[1]!;
+    expect(secondCard.getAttribute('data-question-id')).toBe('q1');
+    expect(secondCard.querySelector('.qa-votes-badge')?.textContent).toBe('▲ 10');
+    expect(secondCard.querySelector('.qa-status-badge')?.textContent).toBe('pending');
+    expect(secondCard.querySelector('.qa-referenced-slide')?.textContent).toBe(
+      'System Architecture',
+    );
+    expect(secondCard.querySelector('.qa-submitter-name')?.textContent).toBe('Alice');
+  });
+
+  it('updates dynamically on real-time events without jumping scroll position (SPEC-008a)', () => {
+    const qa = new QaSlideController('session-123', 'https://api.agora.test');
+    const container = document.createElement('div');
+    qa.mount(container as unknown as HTMLElement);
+
+    qa.setQuestions([
+      {
+        id: 'q1',
+        sessionId: 'session-123',
+        slideId: 'slide-1',
+        participantId: 'p1',
+        content: 'Initial question',
+        status: 'pending',
+        upvotes: 5,
+        createdAt: '2026-10-19T10:00:00.000Z',
+      },
+    ]);
+
+    // Simulate user scroll position on conference projector/presenter screen
+    container.scrollTop = 240;
+
+    // 1. Live new question submitted
+    qa.handleRealtimeEvent('question.submitted', {
+      id: 'q2',
+      sessionId: 'session-123',
+      slideId: 'slide-2',
+      participantId: 'p2',
+      participantName: 'Bob',
+      content: 'Real-time submitted question',
+      status: 'pending',
+      upvotes: 1,
+      createdAt: '2026-10-19T10:05:00.000Z',
+    });
+
+    expect(qa.getQuestions().length).toBe(2);
+    // Invariant: scroll position preserved without jumping to top
+    expect(container.scrollTop).toBe(240);
+
+    // 2. Live upvote received: q2 gets 20 upvotes -> ranks top
+    qa.handleRealtimeEvent('question.upvoted', {
+      questionId: 'q2',
+      voteCount: 20,
+      upvotes: 20,
+    });
+
+    expect(
+      container.querySelectorAll('.qa-question-card')[0]?.getAttribute('data-question-id'),
+    ).toBe('q2');
+    expect(container.scrollTop).toBe(240);
+
+    // 3. Live question updated: q1 answered
+    qa.handleRealtimeEvent('question.updated', {
+      id: 'q1',
+      sessionId: 'session-123',
+      slideId: 'slide-1',
+      participantId: 'p1',
+      content: 'Initial question',
+      status: 'answered',
+      upvotes: 5,
+      createdAt: '2026-10-19T10:00:00.000Z',
+    });
+
+    const q1Card = container.querySelectorAll('.qa-question-card')[1]!;
+    expect(q1Card.querySelector('.qa-status-badge')?.textContent).toBe('answered');
+    expect(container.scrollTop).toBe(240);
+  });
+
+  it('renders question detail view with slide snapshot fallback and keyboard/Esc return handling (SPEC-008b)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true }),
+    });
+
+    const qa = new QaSlideController('session-123', 'https://api.agora.test', {
+      presenterToken: 'pres-token-xyz',
+      fetchFn: fetchMock as unknown as typeof fetch,
+      slideTitles: { 'slide-hero': 'Hero Architecture' },
+    });
+
+    const container = document.createElement('div');
+    qa.mount(container as unknown as HTMLElement);
+
+    qa.setQuestions([
+      {
+        id: 'q-detail-1',
+        sessionId: 'session-123',
+        slideId: 'slide-hero',
+        participantId: 'p-1',
+        participantName: 'Charlie',
+        content: 'Can you zoom in on the Durable Object SQLite boundary?',
+        status: 'pending',
+        upvotes: 15,
+        createdAt: '2026-10-19T10:00:00.000Z',
+      },
+    ]);
+
+    container.scrollTop = 150;
+
+    // Click card to open detail view
+    const card = container.querySelector('.qa-question-card') as MockElement | null;
+    card?.trigger('click');
+
+    expect(qa.getViewMode()).toBe('detail');
+    expect(container.querySelector('.qa-detail-view')).not.toBeNull();
+
+    // Verify slide snapshot URL
+    const img = container.querySelector('.qa-slide-preview-image') as MockElement | null;
+    expect(img).not.toBeNull();
+    expect(img?.src).toBe(
+      'https://api.agora.test/api/v1/sessions/session-123/slides/slide-hero/download',
+    );
+
+    const fallback = container.querySelector('.qa-slide-fallback') as MockElement | null;
+    expect(fallback?.style.display).toBe('none');
+
+    // Simulate missing slide PNG asset firing image error event -> displays graceful fallback
+    img?.trigger('error');
+    expect(img?.style.display).toBe('none');
+    expect(fallback?.style.display).toBe('block');
+    expect(fallback?.textContent).toBe('Slide preview unavailable');
+
+    // Presenter action: mark question as answered from detail view
+    const markAnsweredBtn = container.querySelector('.qa-mark-answered-btn') as MockElement | null;
+    expect(markAnsweredBtn).not.toBeNull();
+    expect(markAnsweredBtn?.textContent).toBe('Mark as Answered');
+
+    markAnsweredBtn?.trigger('click');
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.agora.test/api/v1/sessions/session-123/questions/q-detail-1',
+        expect.objectContaining({
+          method: 'PATCH',
+          headers: expect.objectContaining({
+            Authorization: 'Bearer pres-token-xyz',
+            'x-presenter-token': 'pres-token-xyz',
+          }),
+          body: JSON.stringify({ status: 'answered' }),
+        }),
+      );
+    });
+
+    expect(qa.getSelectedQuestion()?.status).toBe('answered');
+    const updatedBtn = container.querySelector('.qa-mark-answered-btn') as MockElement | null;
+    expect(updatedBtn?.textContent).toBe('Answered ✓');
+
+    // UI Back Button returns to list view and restores saved scroll position
+    const backBtn = container.querySelector('.qa-back-btn') as MockElement | null;
+    expect(backBtn).not.toBeNull();
+    backBtn?.trigger('click');
+
+    expect(qa.getViewMode()).toBe('list');
+    expect(container.scrollTop).toBe(150);
+  });
+
+  it('integrates embedded Q&A slide with RevealAudiencePlugin without navigating deck (SPEC-008)', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/questions')) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 'q-init-1',
+              sessionId: 'session-123',
+              slideId: 'slide-intro',
+              participantId: 'p-init',
+              content: 'Plugin initial question',
+              status: 'pending',
+              upvotes: 8,
+              createdAt: '2026-10-19T10:00:00.000Z',
+            },
+          ],
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    const mockDeck: RevealDeck = {
+      getConfig: () => ({
+        audience: {
+          sessionId: 'session-123',
+          endpoint: 'https://api.agora.test',
+          presenterToken: 'pres-token',
+        },
+      }),
+      on: vi.fn(),
+      slide: vi.fn(),
+    };
+
+    const plugin = new RevealAudiencePlugin({
+      sessionId: 'session-123',
+      endpoint: 'https://api.agora.test',
+      presenterToken: 'pres-token',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    await plugin.init(mockDeck);
+
+    // Slide marked with data-component="audience-qa"
+    const qaSlideSection = document.createElement('section');
+    qaSlideSection.setAttribute('data-slide-id', 'qa-slide');
+    qaSlideSection.setAttribute('data-component', 'audience-qa');
+
+    // Trigger slide change to Q&A slide
+    const slideChangedListener = (mockDeck.on as ReturnType<typeof vi.fn>).mock.calls.find(
+      (call) => call[0] === 'slidechanged',
+    )?.[1] as (e: RevealSlideChangedEvent) => void;
+
+    expect(slideChangedListener).toBeDefined();
+
+    slideChangedListener({
+      currentSlide: qaSlideSection as unknown as Element,
+      indexh: 3,
+      indexv: 0,
+    });
+
+    const qaController = plugin.getQaController();
+    expect(qaController).not.toBeNull();
+
+    // Verify initial questions loaded via fetchFn
+    await vi.waitFor(() => {
+      expect(qaController?.getQuestions().length).toBe(1);
+    });
+
+    // Enter detail view on the Q&A slide
+    qaController?.selectQuestion('q-init-1');
+    expect(qaController?.getViewMode()).toBe('detail');
+
+    // Invariant: mockDeck.slide MUST NOT be invoked when inspecting question detail
+    expect(mockDeck.slide).not.toHaveBeenCalled();
+
+    // Press Escape to return to list
+    const escEvent = new MockKeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    window.dispatchEvent(escEvent as unknown as Event);
+
+    expect(qaController?.getViewMode()).toBe('list');
+    expect(escEvent.defaultPrevented).toBe(true);
+    expect(escEvent.propagationStopped).toBe(true);
+
+    // Deck slide coordinates still untouched
+    expect(mockDeck.slide).not.toHaveBeenCalled();
+
+    plugin.destroy();
+  });
 });
