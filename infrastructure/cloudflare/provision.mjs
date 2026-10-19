@@ -47,9 +47,7 @@ export async function provisionInfrastructure(options = {}) {
   console.log('----------------------------------------------------');
   console.log(' Agora Cloudflare Infrastructure Provisioner (IaC)');
   console.log('----------------------------------------------------');
-  console.log(
-    `Account ID: ${sanitizeLog(accountId.slice(0, 6))}...${sanitizeLog(accountId.slice(-4))}`,
-  );
+  console.log('Account ID: [REDACTED]');
   console.log(`Target D1:  ${sanitizeLog(d1DatabaseName)}`);
   console.log(`Target R2:  ${sanitizeLog(r2BucketName)}`);
   console.log('----------------------------------------------------');
