@@ -69,17 +69,15 @@ export interface AgoraWorkerAppOptions {
 }
 
 export function sanitizeText(input: string): string {
-  let prev = '';
-  let curr = input;
-  while (curr !== prev) {
-    prev = curr;
-    curr = curr
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, '')
-      .replace(/<[^>]*>/g, '')
-      .replace(/(?:javascript|vbscript|data):/gi, '');
-  }
-  return curr.trim();
+  return input
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .replace(/(?:javascript|vbscript|data):/gi, '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .trim();
 }
 
 export function normalizeWordCloudTerm(input: string): string {
