@@ -15,13 +15,13 @@
 ## Session 001 — 2026-10-18
 - **Role**: 14-Practice Harness & CI/CD Pipeline Engineer
 - **Goals**:
-  1. Establish root harness files (`AGENTS.md`, `CLAUDE.md`, `ARCHITECTURE.md`, `init.sh`, `feature_list.json`, `claude-progress.md`, `session-handoff.md`).
+  1. Establish root harness files (`AGENTS.md`, `AGENT.md`, `ARCHITECTURE.md`, `init.sh`, `feature_list.json`, `agent-progress.md`, `session-handoff.md`).
   2. Implement progressive disclosure docs (`docs/DESIGN.md`, `docs/FRONTEND.md`, `docs/PLANS.md`, `docs/PRODUCT_SENSE.md`, `docs/QUALITY_SCORE.md`, `docs/RELIABILITY.md`, `docs/SECURITY.md`, `docs/adr/*`, `sops/*`).
   3. Build mechanical harness scripts & templates (`harness/validate-harness.mjs`, `harness/verify-architecture.mjs`, `harness/victory-detector.mjs`, `harness/maker-checker-graph.mjs`, checklist and prompt templates).
   4. Create GitHub Actions CI/CD workflows (`.github/workflows/ci.yml`, `.github/workflows/deploy.yml`).
 - **Completed**:
   - Implemented `AGENTS.md` (<120 lines) as concise router covering startup sequence, rules, progressive disclosure links, and clean state protocol.
-  - Implemented `CLAUDE.md` with explicit loop and mechanical completion gate.
+  - Implemented `AGENT.md` with explicit loop and mechanical completion gate.
   - Implemented `ARCHITECTURE.md` as authoritative system of record documenting the monorepo layout, pure domain invariants, D1/Durable Object SQLite/R2 topology, and WebSocket RealtimeEvent envelopes.
   - Created executable `init.sh` baseline verification script with prerequisite checks and optional `RUN_START_COMMAND`.
   - Created `feature_list.json` specifying all 24 features with priority 1..24, passing statuses, verification commands, and structured evidence.
@@ -450,6 +450,28 @@
   - CI Run `39231622069`: Step "Apply D1 Database Migrations" succeeded applying remote D1 migrations cleanly.
   - `./init.sh`: 14/14 test suites (184 tests) passing.
   - `pnpm run harness:victory`: 🏆 VICTORY DETECTED (All 3 termination layers verified successfully).
+
+---
+
+## Session 021 — 2026-10-19
+- **Role**: Universal Agent Harness & Repository Refactoring Engineer
+- **Goals**:
+  1. Universalize terminology across repository: rename all occurrences and files containing "claude" to "agent".
+  2. Rename `CLAUDE.md` to `AGENT.md`.
+  3. Rename `claude-progress.md` to `agent-progress.md`.
+  4. Update all references in `AGENTS.md`, `README.md`, `harness/`, `sops/`, and skill definitions.
+  5. Verify mechanical harness (`validate-harness.mjs`), clean architecture, `./init.sh`, and Three-Layer Victory Detector (`victory-detector.mjs`).
+- **Completed**:
+  - Renamed `CLAUDE.md` -> `AGENT.md` and `claude-progress.md` -> `agent-progress.md` via `git mv`.
+  - Updated references across `AGENTS.md`, `AGENT.md`, `README.md`, `harness/clean-state-checklist.md`, `harness/evaluator-rubric.md`, `harness/failure-signals-checklist.md`, `harness/validate-harness.mjs`, `harness/victory-detector.mjs`, and `sops/encode-knowledge-into-repo.md`.
+  - Replaced Claude-specific terminology in `.agent/skills/ui-ux-pro-max/scripts/search.py` with universal agent terms.
+  - Verified 0 remaining matches of "claude" across the entire repository.
+  - Executed `./init.sh` and `pnpm run harness:victory`: all 14 test suites (184 tests), mechanical checks, formatting, and 3 victory layers passed cleanly.
+- **Verification Evidence**:
+  - `git grep -in "claude"`: 0 matches.
+  - `./init.sh`: 14/14 test suites (184 tests) passing.
+  - `pnpm run harness:victory`: 🏆 VICTORY DETECTED (All 3 termination layers verified successfully).
+
 
 
 

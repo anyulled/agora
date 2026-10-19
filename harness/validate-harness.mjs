@@ -27,14 +27,14 @@ const requiredSubsystemFiles = [
   // Subsystem 1: Router & Operating Loop
   'README.md',
   'AGENTS.md',
-  'CLAUDE.md',
+  'AGENT.md',
   // Subsystem 2: System of Record
   'ARCHITECTURE.md',
   'SPECIFICATION.md',
   // Subsystem 3: Primitive State
   'feature_list.json',
   // Subsystem 4: Progress Ledger
-  'claude-progress.md',
+  'agent-progress.md',
   'session-handoff.md',
   // Subsystem 5: Mechanical Linters, Git Hooks & Guardrails
   'eslint.config.mjs',

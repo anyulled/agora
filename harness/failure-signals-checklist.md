@@ -24,4 +24,4 @@
 3. Execute the corresponding mechanical countermeasure command.
 4. If tests fail, view the exact stderr and traceback.
 5. Revert unverified speculative edits: `git checkout -- <file>`.
-6. Resume through the canonical loop in `CLAUDE.md`.
+6. Resume through the canonical loop in `AGENT.md`.

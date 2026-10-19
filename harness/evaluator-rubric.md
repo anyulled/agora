@@ -32,7 +32,7 @@ Each feature or slice is graded on a 0–10 scale across five core dimensions (M
 - **0/10**: Completely broken UI or inaccessible to keyboard/screen readers.
 
 ### Dimension 5: Code Quality & Harness Adherence (Weight: 15%)
-- **10/10**: Clean Biome format/lint, strict TypeScript zero errors, WIP=1 maintained, `claude-progress.md` and `session-handoff.md` updated.
+- **10/10**: Clean Biome format/lint, strict TypeScript zero errors, WIP=1 maintained, `agent-progress.md` and `session-handoff.md` updated.
 - **7/10**: Typecheck passes with `any` casts or unformatted code.
 - **3/10**: WIP limit violated, missing progress updates.
 - **0/10**: Syntax errors, broken builds, or corrupted git worktree.

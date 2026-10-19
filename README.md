@@ -213,7 +213,7 @@ sequenceDiagram
 | # | Practice | Description | Primary File / Script |
 |---|---|---|---|
 | **1** | **WIP = 1 Invariant** | Exactly one feature in progress at any time | [`feature_list.json`](./feature_list.json) |
-| **2** | **ACID Progress Atomic Updates** | Atomic updates to feature status and progress logs | [`claude-progress.md`](./claude-progress.md) |
+| **2** | **ACID Progress Atomic Updates** | Atomic updates to feature status and progress logs | [`agent-progress.md`](./agent-progress.md) |
 | **3** | **Passing Requires Evidence** | Verification commands and stdout logs required for pass | [`harness/`](./harness/) |
 | **4** | **Pure Domain Boundary** | Strict enforcement of domain & application purity | [`harness/verify-architecture.mjs`](./harness/verify-architecture.mjs) |
 | **5** | **Local Cloudflare Emulation** | SQLite/R2 local emulation without remote mocks | [`packages/backend/src/emulation/`](./packages/backend/src/emulation/) |

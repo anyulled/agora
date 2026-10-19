@@ -1,4 +1,4 @@
-# CLAUDE.md — Agora Operating Loop & Completion Gate
+# AGENT.md — Agora Operating Loop & Completion Gate
 
 > Aligned with `AGENTS.md` and the 14-Practice Harness Engineering standard.
 
@@ -10,7 +10,7 @@ You are an autonomous engineering agent building Agora, the interactive conferen
 2. **Never import Cloudflare, React, or Reveal.js in domain or application packages** (`packages/domain`, `packages/application`).
 3. **WIP = 1**: At most one feature can be in `in_progress` in `feature_list.json`.
 4. **Passing Requires Evidence**: A feature cannot be set to `passing` without non-empty `verification` steps and matching `evidence` in `feature_list.json`.
-5. **Atomic State Updates**: Update `feature_list.json`, `claude-progress.md`, and `session-handoff.md` together with code changes.
+5. **Atomic State Updates**: Update `feature_list.json`, `agent-progress.md`, and `session-handoff.md` together with code changes.
 6. **No Hallucinated Passes**: Always execute commands, check exit codes, and read output before declaring success.
 
 ## 3. Session Operating Loop
@@ -18,7 +18,7 @@ You are an autonomous engineering agent building Agora, the interactive conferen
 [Start Session]
       │
       ▼
-1. Startup Inspection (pwd, claude-progress.md, feature_list.json, git log -5)
+1. Startup Inspection (pwd, agent-progress.md, feature_list.json, git log -5)
       │
       ▼
 2. Baseline Verification (./init.sh)
@@ -36,7 +36,7 @@ You are an autonomous engineering agent building Agora, the interactive conferen
 6. Architectural Verification (node harness/verify-architecture.mjs && node harness/validate-harness.mjs)
       │
       ▼
-7. Update Primitives (Set status to 'passing', record evidence, update claude-progress.md)
+7. Update Primitives (Set status to 'passing', record evidence, update agent-progress.md)
       │
       ▼
 8. Completion Gate (pnpm run verify && pnpm run harness:victory)
@@ -67,4 +67,4 @@ Before marking any task complete or finishing your turn:
 - [ ] `pnpm run typecheck` passes with zero TypeScript errors
 - [ ] `pnpm test` passes
 - [ ] `node harness/victory-detector.mjs` passes all 3 layers
-- [ ] `claude-progress.md` and `session-handoff.md` are updated with verified evidence
+- [ ] `agent-progress.md` and `session-handoff.md` are updated with verified evidence

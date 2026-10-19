@@ -46,5 +46,5 @@
 
 ## 4. Continuity State Artifacts
 - [ ] `feature_list.json` updated with latest status, verification commands, and evidence.
-- [ ] `claude-progress.md` appended with session summary, timestamps, and test counts.
+- [ ] `agent-progress.md` appended with session summary, timestamps, and test counts.
 - [ ] `session-handoff.md` overwritten with verified state, changes, and exact reproducer commands.

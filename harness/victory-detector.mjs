@@ -46,7 +46,7 @@ const layer1Files = [
   'SPECIFICATION.md',
   'ARCHITECTURE.md',
   'AGENTS.md',
-  'CLAUDE.md',
+  'AGENT.md',
   'init.sh',
   'docs/DESIGN.md',
   'docs/FRONTEND.md',
@@ -144,17 +144,17 @@ if (!fs.existsSync(featureListPath)) {
 // ============================================================================
 console.log('\n--> Evaluating Layer 3: Progress Ledger & Session Handoff...');
 
-const progressPath = path.join(rootDir, 'claude-progress.md');
+const progressPath = path.join(rootDir, 'agent-progress.md');
 const handoffPath = path.join(rootDir, 'session-handoff.md');
 
 let layer3Ok = true;
 if (!fs.existsSync(progressPath)) {
-  failLayer(3, 'claude-progress.md is missing.');
+  failLayer(3, 'agent-progress.md is missing.');
   layer3Ok = false;
 } else {
   const content = fs.readFileSync(progressPath, 'utf8').trim();
   if (content.length < 50) {
-    failLayer(3, 'claude-progress.md is too short or empty.');
+    failLayer(3, 'agent-progress.md is too short or empty.');
     layer3Ok = false;
   }
 }

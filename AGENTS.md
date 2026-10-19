@@ -5,7 +5,7 @@
 ## 1. Startup Workflow
 Run this sequence before taking any task action:
 1. `pwd` — Ensure you are in `/Users/alrs/Documents/agora`.
-2. Inspect `claude-progress.md` — Identify last completed session, blockers, and recent changes.
+2. Inspect `agent-progress.md` — Identify last completed session, blockers, and recent changes.
 3. Inspect `feature_list.json` — Review feature status (WIP=1 invariant). Check active or failing features.
 4. `git log --oneline -5` — Understand recent atomic commits.
 5. `./init.sh` — Run canonical baseline verification (lint, architecture check, typecheck, tests).
@@ -13,7 +13,7 @@ Run this sequence before taking any task action:
 
 ## 2. Working Rules & Invariants
 - **WIP = 1**: At most one feature in `in_progress` in `feature_list.json` at any time.
-- **ACID Progress Updates**: Whenever you modify code, update `feature_list.json` and `claude-progress.md` atomically in the same step.
+- **ACID Progress Updates**: Whenever you modify code, update `feature_list.json` and `agent-progress.md` atomically in the same step.
 - **Passing Requires Evidence**: A feature cannot be marked `passing` without a non-empty `verification` command list and concrete `evidence` log entry.
 - **Pure Domain Boundary**: `packages/domain` and `packages/application` MUST NEVER import Cloudflare Workers, React, DOM, or Reveal.js (`verify-architecture.mjs`).
 - **Local Cloudflare Emulation First**: Favor emulating Cloudflare services (D1 SQLite, Durable Object embedded SQLite `ctx.storage.sql`, R2 buckets, WebSocket hibernation) locally via `createLocalCloudflareEnv` (`node:sqlite` + local R2) and `pnpm run cf:emulate` before any remote deployment.
@@ -38,7 +38,7 @@ Load specialized documentation only when the current task demands it:
 ## 4. Required Artifacts
 On every feature completion or significant change:
 1. `feature_list.json` — Updated status, verification array, and evidence array.
-2. `claude-progress.md` — Append session log with timestamp, changes, verification output, and blockers.
+2. `agent-progress.md` — Append session log with timestamp, changes, verification output, and blockers.
 3. `session-handoff.md` — Overwritten with current Verified Now, Changed, Broken/Unverified, Next Best Step.
 
 ## 5. Definition of Done
