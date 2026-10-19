@@ -632,7 +632,7 @@ export function renderAdminDashboardHtml(state: AdminDashboardViewModel): string
         ${sessionJoinHtml}
         <div class="button-group">
           <button class="btn-primary" data-action="start-session" data-id="${escapeHtml(p.id)}">Start Live Session</button>
-          <button class="btn-secondary" data-action="generate-images" data-id="${escapeHtml(p.id)}">Generate Images</button>
+          <button class="btn-secondary" data-action="generate-images" data-id="${escapeHtml(p.id)}">Generate All Slide Images</button>
           <button class="btn-secondary" data-action="duplicate" data-id="${escapeHtml(p.id)}">Duplicate</button>
           <button class="btn-danger" data-action="request-delete" data-id="${escapeHtml(p.id)}">Delete</button>
         </div>

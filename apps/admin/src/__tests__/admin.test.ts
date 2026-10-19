@@ -259,7 +259,7 @@ describe('AdminAppController (SPEC-001, SPEC-013, SPEC-015, SPEC-017, SPEC-024)'
 
       expect(html).toContain('Dashboard Presentation');
       expect(html).toContain('Start Live Session');
-      expect(html).toContain('Generate Images');
+      expect(html).toContain('Generate All Slide Images');
       expect(html).toContain(session.audienceUrl);
       expect(html).toContain('session-qr-code');
     });
