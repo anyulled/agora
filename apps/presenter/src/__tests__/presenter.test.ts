@@ -419,4 +419,85 @@ describe('PresenterAppController (SPEC-008, SPEC-011, SPEC-012, SPEC-023)', () =
       expect(html).not.toContain('metrics-hud');
     });
   });
+
+  describe('SPEC-009: Real-time reaction HUD and live event sync', () => {
+    it('updates reactions for the current slide upon receiving direct reactions', () => {
+      expect(presenter.getReactionsForCurrentSlide()).toEqual({
+        '👍': 0,
+        '🤔': 0,
+        '❤️': 0,
+        '😴': 0,
+      });
+
+      presenter.receiveReaction('slide_0', '👍');
+      presenter.receiveReaction('slide_0', '❤️');
+      presenter.receiveReaction('slide_0', '👍');
+
+      const reactions = presenter.getReactionsForCurrentSlide();
+      expect(reactions['👍']).toBe(2);
+      expect(reactions['❤️']).toBe(1);
+      expect(reactions['🤔']).toBe(0);
+      expect(reactions['😴']).toBe(0);
+
+      const html = renderPresenterViewHtml(presenter.getViewState());
+      expect(html).toContain('<span>👍 2</span>');
+      expect(html).toContain('<span>❤️ 1</span>');
+      expect(html).toContain('<span>🤔 0</span>');
+      expect(html).toContain('<span>😴 0</span>');
+    });
+
+    it('processes reaction.summary real-time WebSocket events for the active slide', () => {
+      presenter.handleRealtimeEvent({
+        id: 'evt-r-summary',
+        type: 'reaction.summary',
+        sessionId: 'sess_1',
+        timestamp: new Date().toISOString(),
+        payload: {
+          slideId: 'slide_0',
+          counts: {
+            '👍': 12,
+            '🤔': 4,
+            '❤️': 8,
+            '😴': 1,
+          },
+        },
+      });
+
+      const current = presenter.getReactionsForCurrentSlide();
+      expect(current).toEqual({
+        '👍': 12,
+        '🤔': 4,
+        '❤️': 8,
+        '😴': 1,
+      });
+    });
+
+    it('notifies subscribers reactively when reaction events arrive', () => {
+      let notifiedCount = 0;
+      let lastReactions = presenter.getReactionsForCurrentSlide();
+
+      const unsubscribe = presenter.subscribe((state) => {
+        notifiedCount++;
+        lastReactions = state.reactions;
+      });
+
+      presenter.handleRealtimeEvent({
+        id: 'evt-r-1',
+        type: 'reaction.added',
+        sessionId: 'sess_1',
+        timestamp: new Date().toISOString(),
+        payload: {
+          slideId: 'slide_0',
+          reaction: '🤔',
+        },
+      });
+
+      expect(notifiedCount).toBe(1);
+      expect(lastReactions['🤔']).toBe(1);
+
+      unsubscribe();
+      presenter.receiveReaction('slide_0', '👍');
+      expect(notifiedCount).toBe(1); // No further notifications after unsubscribe
+    });
+  });
 });

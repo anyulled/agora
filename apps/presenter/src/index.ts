@@ -1,14 +1,15 @@
-import type {
-  AssetManifest,
-  AudienceQuestion,
-  NavigationSuggestion,
-  Presentation,
-  PresentationSession,
-  QuestionStatus,
-  Reaction,
-  ReactionCounts,
-  RealtimeEvent,
-  SlideMetadata,
+import {
+  ALLOWED_REACTIONS,
+  type AssetManifest,
+  type AudienceQuestion,
+  type NavigationSuggestion,
+  type Presentation,
+  type PresentationSession,
+  type QuestionStatus,
+  type Reaction,
+  type ReactionCounts,
+  type RealtimeEvent,
+  type SlideMetadata,
 } from '@agora/contracts';
 
 export type QaViewMode = 'list' | 'detail';
@@ -73,6 +74,8 @@ export class PresenterAppController {
   private qaViewMode: QaViewMode = 'list';
   private selectedQuestionId: string | null = null;
   private qaSortBy: 'votes' | 'time' = 'votes';
+
+  private listeners = new Set<(state: PresenterViewState) => void>();
 
   constructor(
     session: PresentationSession,
@@ -240,6 +243,7 @@ export class PresenterAppController {
   // Real-time HUD updates (SPEC-009, SPEC-012)
   updateParticipantCount(count: number): void {
     this.session.connectedParticipants = Math.max(0, count);
+    this.notifyListeners();
   }
 
   receiveReaction(slideId: string, reaction: Reaction): void {
@@ -249,6 +253,7 @@ export class PresenterAppController {
       this.reactionsBySlide.set(slideId, counts);
     }
     counts[reaction] += 1;
+    this.notifyListeners();
   }
 
   getReactionsForCurrentSlide(): ReactionCounts {
@@ -257,6 +262,18 @@ export class PresenterAppController {
     if (!current) return defaults;
     const counts = this.reactionsBySlide.get(current.id);
     return counts ? { ...counts } : defaults;
+  }
+
+  subscribe(listener: (state: PresenterViewState) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private notifyListeners(): void {
+    const state = this.getViewState();
+    for (const listener of this.listeners) {
+      listener(state);
+    }
   }
 
   // Adaptive navigation (SPEC-011)
@@ -319,6 +336,49 @@ export class PresenterAppController {
             s.delete(p.participantId);
           }
           q.upvotedByParticipantIds = Array.from(s);
+        }
+      }
+      this.notifyListeners();
+    } else if (event.type === 'reaction.summary') {
+      const p = event.payload as
+        | { slideId?: string; counts?: ReactionCounts; summary?: ReactionCounts }
+        | Record<string, ReactionCounts>;
+      if (p && typeof p === 'object') {
+        const candidate = p as {
+          slideId?: unknown;
+          counts?: unknown;
+          summary?: unknown;
+        };
+        const resolvedCounts = candidate.counts ?? candidate.summary;
+        if (
+          typeof candidate.slideId === 'string' &&
+          resolvedCounts &&
+          typeof resolvedCounts === 'object'
+        ) {
+          this.reactionsBySlide.set(candidate.slideId, {
+            ...(resolvedCounts as ReactionCounts),
+          });
+        } else {
+          for (const [sId, counts] of Object.entries(p)) {
+            if (counts && typeof counts === 'object') {
+              this.reactionsBySlide.set(sId, { ...(counts as ReactionCounts) });
+            }
+          }
+        }
+        this.notifyListeners();
+      }
+    } else if (event.type === 'reaction.added') {
+      const p = event.payload as {
+        slideId?: string;
+        reaction?: Reaction;
+        counts?: ReactionCounts;
+      };
+      if (p?.slideId) {
+        if (p.counts && typeof p.counts === 'object') {
+          this.reactionsBySlide.set(p.slideId, { ...p.counts });
+          this.notifyListeners();
+        } else if (p.reaction && ALLOWED_REACTIONS.includes(p.reaction)) {
+          this.receiveReaction(p.slideId, p.reaction);
         }
       }
     }

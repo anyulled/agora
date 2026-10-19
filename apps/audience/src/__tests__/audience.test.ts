@@ -727,6 +727,107 @@ describe('AudienceAppController (SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-00
       // @ts-expect-error test invalid emoji
       expect(() => audience.sendReaction('🔥')).toThrow(/Invalid reaction/);
     });
+
+    it('sends reaction.added event over WebSocket when connected', () => {
+      const sentMessages: string[] = [];
+      const mockWs = {
+        readyState: 1,
+        send: (data: string) => sentMessages.push(data),
+      };
+
+      // @ts-expect-error inject mock socket
+      audience.ws = mockWs;
+
+      audience.sendReaction('😴');
+
+      expect(sentMessages.length).toBe(1);
+      const parsed = JSON.parse(sentMessages[0]!);
+      expect(parsed.type).toBe('reaction.added');
+      expect(parsed.token).toBe(audience.getParticipant().token);
+      expect(parsed.payload.slideId).toBe('s1');
+      expect(parsed.payload.reaction).toBe('😴');
+    });
+
+    it('submits reaction via HTTP API with sendReactionToApi', async () => {
+      let requestedUrl = '';
+      let requestedMethod = '';
+      let requestedHeaders: HeadersInit = {};
+      let requestedBody = '';
+
+      const mockFetch: typeof fetch = async (input, init) => {
+        requestedUrl = input.toString();
+        requestedMethod = init?.method ?? 'GET';
+        requestedHeaders = init?.headers ?? {};
+        requestedBody = init?.body?.toString() ?? '';
+
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            summary: {
+              '👍': 10,
+              '🤔': 5,
+              '❤️': 7,
+              '😴': 2,
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
+
+      audience.connectWebSocket({
+        sessionId: 'sess_123',
+        endpoint: 'https://api.agora.test',
+        webSocketFactory: () => ({ send: () => {} }),
+      });
+
+      const updated = await audience.sendReactionToApi('❤️', mockFetch);
+      expect(requestedUrl).toBe('https://api.agora.test/api/v1/sessions/sess_123/reactions');
+      expect(requestedMethod).toBe('POST');
+      expect((requestedHeaders as Record<string, string>).Authorization).toBe(
+        `Bearer ${audience.getParticipant().token}`,
+      );
+      expect(JSON.parse(requestedBody)).toEqual({ slideId: 's1', reaction: '❤️' });
+      expect(updated['❤️']).toBe(7);
+      expect(audience.getReactionsForActiveSlide()['❤️']).toBe(7);
+    });
+
+    it('updates reactions upon receiving reaction.summary and reaction.added events', () => {
+      audience.handleRealtimeEvent({
+        id: 'evt-react-sum',
+        type: 'reaction.summary',
+        sessionId: 'session-abc',
+        timestamp: new Date().toISOString(),
+        payload: {
+          slideId: 's1',
+          counts: {
+            '👍': 20,
+            '🤔': 10,
+            '❤️': 15,
+            '😴': 3,
+          },
+        },
+      });
+
+      expect(audience.getReactionsForActiveSlide()).toEqual({
+        '👍': 20,
+        '🤔': 10,
+        '❤️': 15,
+        '😴': 3,
+      });
+
+      audience.handleRealtimeEvent({
+        id: 'evt-react-add',
+        type: 'reaction.added',
+        sessionId: 'session-abc',
+        timestamp: new Date().toISOString(),
+        payload: {
+          slideId: 's1',
+          reaction: '😴',
+        },
+      });
+
+      expect(audience.getReactionsForActiveSlide()['😴']).toBe(4);
+    });
   });
 
   describe('Polls and Word Clouds (SPEC-010, SPEC-021)', () => {
