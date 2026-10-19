@@ -529,6 +529,28 @@ describe('PresenterAppController (SPEC-008, SPEC-011, SPEC-012, SPEC-023)', () =
       expect(presenter.getProjectorViewState().projectedPollResults?.totalResponses).toBe(2);
     });
 
+    it('creates an empty authoritative summary when revealing before results load', () => {
+      const poll = {
+        id: 'poll-no-votes-yet',
+        sessionId: 'sess_1',
+        slideId: 'slide_0',
+        question: 'Which option?',
+        type: 'single' as const,
+        options: [{ id: 'option-a', label: 'Option A' }],
+        status: 'open' as const,
+        resultsRevealed: false,
+      };
+
+      presenter.setPolls([poll]);
+      expect(presenter.getPollResults(poll.id)).toBeNull();
+      expect(presenter.revealPollResults(poll.id)).toBe(true);
+      expect(presenter.getPollResults(poll.id)).toMatchObject({
+        totalResponses: 0,
+        countsByOptionId: { 'option-a': 0 },
+        resultsRevealed: true,
+      });
+    });
+
     it('manages poll lifecycle (open, close, reveal) and synchronizes with projector', () => {
       const poll = {
         id: 'poll-arch',

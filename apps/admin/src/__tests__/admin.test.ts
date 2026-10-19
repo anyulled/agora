@@ -274,6 +274,17 @@ describe('AdminAppController (SPEC-001, SPEC-013, SPEC-015, SPEC-017, SPEC-024)'
       expect(html).toContain('Delete Presentation');
     });
 
+    it('escapes user-controlled values in the delete confirmation modal', () => {
+      const html = renderDeleteConfirmationModalHtml({
+        isOpen: true,
+        presentationId: 'id"><img src=x onerror=alert(1)>',
+        presentationTitle: '<img src=x onerror=alert(1)>',
+      });
+
+      expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+      expect(html).not.toContain('<img src=x');
+    });
+
     it('renders workflow HTML with progress bar and retry alerts', () => {
       const html = renderSlideImageWorkflowHtml({
         presentationId: 'pres_1',

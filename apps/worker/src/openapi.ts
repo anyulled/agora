@@ -488,12 +488,17 @@ export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
               type: 'string',
               enum: ['single', 'single-choice', 'multiple', 'multiple-choice', 'binary'],
             },
+            status: { type: 'string', enum: ['draft', 'open'] },
             options: {
               type: 'array',
               items: {
                 type: 'object',
-                required: ['id', 'label'],
-                properties: { id: { type: 'string' }, label: { type: 'string' } },
+                required: ['id'],
+                properties: {
+                  id: { type: 'string' },
+                  label: { type: 'string' },
+                  text: { type: 'string' },
+                },
               },
             },
           },
@@ -798,15 +803,27 @@ export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
           sessionId: { type: 'string' },
           slideId: { type: 'string' },
           question: { type: 'string' },
-          type: { type: 'string', enum: ['single', 'multiple', 'binary'] },
+          type: {
+            type: 'string',
+            enum: ['single', 'single-choice', 'multiple', 'multiple-choice', 'binary'],
+          },
           options: { type: 'array', items: { type: 'object' } },
-          status: { type: 'string', enum: ['draft', 'open', 'closed'] },
+          status: { type: 'string', enum: ['draft', 'open', 'closed', 'revealed'] },
           resultsRevealed: { type: 'boolean' },
         },
       },
       PollResultsSummary: {
         type: 'object',
-        required: ['pollId', 'slideId', 'status', 'totalResponses', 'countsByOptionId'],
+        required: [
+          'pollId',
+          'slideId',
+          'status',
+          'totalResponses',
+          'countsByOptionId',
+          'question',
+          'type',
+          'options',
+        ],
         properties: {
           pollId: { type: 'string' },
           slideId: { type: 'string' },
@@ -814,6 +831,12 @@ export const AGORA_OPENAPI_SPEC: OpenApiDocument = {
           resultsRevealed: { type: 'boolean' },
           totalResponses: { type: 'integer' },
           countsByOptionId: { type: 'object', additionalProperties: { type: 'integer' } },
+          question: { type: 'string' },
+          type: {
+            type: 'string',
+            enum: ['single', 'single-choice', 'multiple', 'multiple-choice', 'binary'],
+          },
+          options: { type: 'array', items: { type: 'object' } },
         },
       },
       WordCloudPrompt: {

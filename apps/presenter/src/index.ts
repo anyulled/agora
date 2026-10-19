@@ -1,8 +1,5 @@
 import {
   ALLOWED_REACTIONS,
-  escapeHtml,
-  processPollRealtimeEvent,
-  safeUrlAttribute,
   type AssetManifest,
   type AudienceQuestion,
   type NavigationSuggestion,
@@ -16,6 +13,9 @@ import {
   type ReactionCounts,
   type RealtimeEvent,
   type SlideMetadata,
+  escapeHtml,
+  processPollRealtimeEvent,
+  safeUrlAttribute,
 } from '@agora/contracts';
 
 export type QaViewMode = 'list' | 'detail';
@@ -550,8 +550,18 @@ export class PresenterAppController {
   revealPollResults(pollId: string): boolean {
     const poll = this.polls.find((p) => p.id === pollId);
     if (!poll) return false;
-    const summary = this.pollResults.get(pollId);
-    if (!summary) return false;
+    const summary = this.pollResults.get(pollId) ?? {
+      pollId: poll.id,
+      slideId: poll.slideId,
+      question: poll.question,
+      type: poll.type,
+      options: poll.options.map((option) => ({ ...option })),
+      status: poll.status,
+      resultsRevealed: false,
+      totalResponses: 0,
+      countsByOptionId: Object.fromEntries(poll.options.map((option) => [option.id, 0])),
+    };
+    this.pollResults.set(pollId, summary);
     poll.resultsRevealed = true;
     summary.resultsRevealed = true;
     this.notifyListeners();
