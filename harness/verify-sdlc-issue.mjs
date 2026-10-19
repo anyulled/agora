@@ -12,8 +12,20 @@ import https from 'node:https';
 const DEFAULT_REPO = 'anyulled/agora';
 
 /**
+ * Sanitizes input text before printing to logs to prevent log injection (CWE-117).
+ *
+ * @param {unknown} val
+ * @returns {string}
+ */
+export function sanitizeLog(val) {
+  return String(val ?? '')
+    .replace(/[\r\n\t]/g, ' ')
+    .trim();
+}
+
+/**
  * Extracts issue numbers referenced in text (PR body, PR title, commit messages).
- * Recognizes standard GitHub closing keywords, issue references, and issue URLs.
+ * Uses simple, non-backtracking regular expressions to avoid ReDoS.
  *
  * @param {string} text
  * @returns {number[]} Array of unique issue numbers
@@ -25,33 +37,24 @@ export function extractIssueReferences(text) {
 
   const issueNumbers = new Set();
 
-  // Pattern 1: Closing keywords (e.g., Fixes #123, Closes #45, Resolves #67)
-  const closingRegex =
-    /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*(?:https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/issues\/|#)(\d+)/gi;
-  for (const match of text.matchAll(closingRegex)) {
+  // Pattern 1: Closing & contextual keywords (e.g., Fixes #123, Closes #45, Resolves #67)
+  const keywordRegex =
+    /\b(?:fixes|fixed|close[sd]?|resolve[sd]?|issue|ref|refs|for|towards)\s+#(\d+)\b/gi;
+  for (const match of text.matchAll(keywordRegex)) {
     if (match[1]) {
       issueNumbers.add(Number.parseInt(match[1], 10));
     }
   }
 
-  // Pattern 2: Contextual keywords (e.g., Issue #123, Ref #45, For #67, Towards #89)
-  const contextualRegex =
-    /(?:issue|ref|refs|for|towards|related to)\s*:?\s*(?:https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/issues\/|#)(\d+)/gi;
-  for (const match of text.matchAll(contextualRegex)) {
-    if (match[1]) {
-      issueNumbers.add(Number.parseInt(match[1], 10));
-    }
-  }
-
-  // Pattern 3: Full issue URLs (e.g., https://github.com/anyulled/agora/issues/123)
-  const urlRegex = /https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/issues\/(\d+)/gi;
+  // Pattern 2: Issue URLs (e.g., https://github.com/anyulled/agora/issues/123)
+  const urlRegex = /https?:\/\/github\.com\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+\/issues\/(\d+)\b/gi;
   for (const match of text.matchAll(urlRegex)) {
     if (match[1]) {
       issueNumbers.add(Number.parseInt(match[1], 10));
     }
   }
 
-  // Pattern 4: Standalone hashtag numbers (e.g., #123)
+  // Pattern 3: Standalone hashtag numbers (e.g., #123)
   const hashtagRegex = /(?:^|[\s(,])#(\d+)\b/g;
   for (const match of text.matchAll(hashtagRegex)) {
     if (match[1]) {
@@ -67,7 +70,7 @@ export function extractIssueReferences(text) {
  *
  * @param {string} endpoint
  * @param {string|null} token
- * @returns {Promise<{ status: number, data: any }>}
+ * @returns {Promise<{ status: number, data: unknown }>}
  */
 export function defaultGithubFetch(endpoint, token = null) {
   return new Promise((resolve, reject) => {
@@ -116,6 +119,60 @@ export function defaultGithubFetch(endpoint, token = null) {
 }
 
 /**
+ * Inspects a single issue reference via GitHub API.
+ */
+async function checkSingleIssue(issueNum, repo, token, fetchFn) {
+  try {
+    const res = await fetchFn(`/repos/${repo}/issues/${issueNum}`, token);
+    if (res.status === 404) {
+      return {
+        type: 'error',
+        msg: `Issue #${issueNum} does not exist in repository ${repo}.`,
+      };
+    }
+    if (res.status !== 200) {
+      return {
+        type: 'error',
+        msg: `Failed to inspect issue #${issueNum} (HTTP status ${res.status}).`,
+      };
+    }
+
+    const issueData = res.data;
+    if (issueData?.pull_request) {
+      return {
+        type: 'error',
+        msg: `#${issueNum} is a Pull Request, not an Issue. SDLC requires associating with an open Issue.`,
+      };
+    }
+
+    if (issueData?.state === 'open') {
+      return {
+        type: 'open',
+        issue: {
+          number: issueData.number,
+          title: sanitizeLog(issueData.title),
+          url: issueData.html_url,
+        },
+      };
+    }
+
+    return {
+      type: 'closed',
+      issue: {
+        number: issueData.number,
+        title: sanitizeLog(issueData.title),
+        state: issueData.state,
+      },
+    };
+  } catch (err) {
+    return {
+      type: 'error',
+      msg: `Error querying issue #${issueNum}: ${err.message || String(err)}`,
+    };
+  }
+}
+
+/**
  * Validates that a pull request is associated with at least one OPEN issue.
  *
  * @param {object} pr - Pull request payload or object { number, title, body, head }
@@ -143,61 +200,32 @@ export async function verifyPullRequestSDLC(pr, options = {}) {
     };
   }
 
+  const results = await Promise.all(
+    referencedNumbers.map((num) => checkSingleIssue(num, repo, token, fetchFn)),
+  );
+
   const openIssues = [];
   const closedIssues = [];
   const errors = [];
 
-  for (const issueNum of referencedNumbers) {
-    try {
-      const res = await fetchFn(`/repos/${repo}/issues/${issueNum}`, token);
-      if (res.status === 404) {
-        errors.push(`Issue #${issueNum} does not exist in repository ${repo}.`);
-        continue;
-      }
-      if (res.status !== 200) {
-        errors.push(`Failed to inspect issue #${issueNum} (HTTP status ${res.status}).`);
-        continue;
-      }
-
-      const issueData = res.data;
-      // In GitHub API, PRs also return under /issues/:number, but have a pull_request property
-      if (issueData.pull_request) {
-        errors.push(
-          `#${issueNum} is a Pull Request, not an Issue. SDLC requires associating with an open Issue.`,
-        );
-        continue;
-      }
-
-      if (issueData.state === 'open') {
-        openIssues.push({
-          number: issueData.number,
-          title: issueData.title,
-          url: issueData.html_url,
-        });
-      } else {
-        closedIssues.push({
-          number: issueData.number,
-          title: issueData.title,
-          state: issueData.state,
-        });
-      }
-    } catch (err) {
-      errors.push(`Error querying issue #${issueNum}: ${err.message || String(err)}`);
+  for (const item of results) {
+    if (item.type === 'open') {
+      openIssues.push(item.issue);
+    } else if (item.type === 'closed') {
+      closedIssues.push(item.issue);
+    } else if (item.type === 'error') {
+      errors.push(item.msg);
     }
   }
 
   if (openIssues.length > 0) {
-    return {
-      passed: true,
-      openIssues,
-      closedIssues,
-      errors: [],
-    };
+    return { passed: true, openIssues, closedIssues, errors: [] };
   }
 
+  const closedSummary = closedIssues.map((i) => `#${i.number} (${i.state})`).join(', ');
   const closedMsg =
     closedIssues.length > 0
-      ? `Referenced issue(s) are already closed: ${closedIssues.map((i) => `#${i.number} (${i.state})`).join(', ')}.`
+      ? `Referenced issue(s) are already closed: ${closedSummary}.`
       : 'No referenced issues were open.';
 
   return {
@@ -211,15 +239,7 @@ export async function verifyPullRequestSDLC(pr, options = {}) {
   };
 }
 
-/**
- * CLI execution entrypoint
- */
-export async function runCli() {
-  const args = process.argv.slice(2);
-  const isStrict = args.includes('--strict');
-  const token = process.env.GITHUB_TOKEN || null;
-  const repo = process.env.GITHUB_REPOSITORY || DEFAULT_REPO;
-
+function parseCliArgs(args) {
   let prNumber = null;
   let prBody = null;
   let prTitle = null;
@@ -237,22 +257,45 @@ export async function runCli() {
     }
   }
 
-  // Check if running inside GitHub Actions pull_request event
-  const eventPath = process.env.GITHUB_EVENT_PATH;
-  if (eventPath && fs.existsSync(eventPath)) {
-    try {
-      const eventData = JSON.parse(fs.readFileSync(eventPath, 'utf8'));
-      if (eventData.pull_request) {
-        prNumber = eventData.pull_request.number;
-        prTitle = eventData.pull_request.title;
-        prBody = eventData.pull_request.body;
-      }
-    } catch (e) {
-      console.warn(`[WARN] Could not parse GITHUB_EVENT_PATH: ${e.message}`);
-    }
-  }
+  return { prNumber, prBody, prTitle };
+}
 
-  // If a specific PR number was given via CLI, fetch its details
+function getEventPrData() {
+  const eventPath = process.env.GITHUB_EVENT_PATH;
+  if (!eventPath || !fs.existsSync(eventPath)) {
+    return null;
+  }
+  try {
+    const eventData = JSON.parse(fs.readFileSync(eventPath, 'utf8'));
+    if (eventData.pull_request) {
+      return {
+        prNumber: eventData.pull_request.number,
+        prTitle: eventData.pull_request.title,
+        prBody: eventData.pull_request.body,
+      };
+    }
+  } catch (e) {
+    console.warn(`[WARN] Could not parse GITHUB_EVENT_PATH: ${sanitizeLog(e.message)}`);
+  }
+  return null;
+}
+
+/**
+ * CLI execution entrypoint
+ */
+export async function runCli() {
+  const args = process.argv.slice(2);
+  const isStrict = args.includes('--strict');
+  const token = process.env.GITHUB_TOKEN || null;
+  const repo = process.env.GITHUB_REPOSITORY || DEFAULT_REPO;
+
+  const parsedArgs = parseCliArgs(args);
+  const eventData = getEventPrData();
+
+  const prNumber = parsedArgs.prNumber ?? eventData?.prNumber ?? null;
+  let prTitle = parsedArgs.prTitle ?? eventData?.prTitle ?? null;
+  let prBody = parsedArgs.prBody ?? eventData?.prBody ?? null;
+
   if (prNumber && (!prTitle || prBody === null)) {
     console.log(`--> Fetching details for Pull Request #${prNumber}...`);
     try {
@@ -262,12 +305,11 @@ export async function runCli() {
         prBody = res.data.body || '';
       }
     } catch (e) {
-      console.error(`Failed to fetch PR #${prNumber}: ${e.message}`);
+      console.error(`Failed to fetch PR #${prNumber}: ${sanitizeLog(e.message)}`);
       process.exit(1);
     }
   }
 
-  // If no PR context is detected:
   if (!prNumber && prBody === null) {
     if (isStrict) {
       console.error(
@@ -288,7 +330,7 @@ export async function runCli() {
     console.log(`Pull Request: #${prNumber}`);
   }
   if (prTitle) {
-    console.log(`Title:        ${prTitle}`);
+    console.log(`Title:        ${sanitizeLog(prTitle)}`);
   }
 
   const result = await verifyPullRequestSDLC(
@@ -299,9 +341,11 @@ export async function runCli() {
   if (result.passed) {
     console.log('\n✅ SDLC VERIFICATION PASSED:');
     for (const openIssue of result.openIssues) {
-      console.log(`   • Linked to Open Issue #${openIssue.number}: "${openIssue.title}"`);
+      console.log(
+        `   • Linked to Open Issue #${openIssue.number}: "${sanitizeLog(openIssue.title)}"`,
+      );
       if (openIssue.url) {
-        console.log(`     ${openIssue.url}`);
+        console.log(`     ${sanitizeLog(openIssue.url)}`);
       }
     }
     console.log('======================================================\n');
@@ -309,7 +353,7 @@ export async function runCli() {
   } else {
     console.error('\n❌ SDLC VERIFICATION FAILED:');
     for (const err of result.errors) {
-      console.error(`   ${err}`);
+      console.error(`   ${sanitizeLog(err)}`);
     }
     console.log('======================================================\n');
     process.exit(1);
@@ -323,8 +367,5 @@ const isDirectCall =
     process.argv[1].includes('verify-sdlc-issue'));
 
 if (isDirectCall) {
-  runCli().catch((err) => {
-    console.error(`Unexpected SDLC verification error: ${err.stack || err}`);
-    process.exit(1);
-  });
+  await runCli();
 }
