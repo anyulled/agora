@@ -151,7 +151,7 @@ export class LocalR2Bucket {
       bytes = value;
     }
 
-    const hash = crypto.createHash('md5').update(bytes).digest('hex');
+    const hash = crypto.createHash('sha256').update(bytes).digest('hex');
     const etag = `"${hash}"`;
     const meta = {
       key,

@@ -69,7 +69,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   if (args.includes('--last')) {
     try {
-      message = execSync('git log -1 --pretty=%B', { encoding: 'utf8' }).trim();
+      message = execSync('git log -1 --pretty=%B', {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: process.env.PATH || '/usr/bin:/bin' },
+      }).trim();
     } catch (e) {
       console.error('Failed to read last git commit:', e.message);
       process.exit(1);

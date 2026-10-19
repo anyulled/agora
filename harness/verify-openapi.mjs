@@ -34,7 +34,7 @@ export function extractWorkerRoutes(workerSource) {
     routes.add(rawPattern);
   }
 
-  return Array.from(routes).sort();
+  return Array.from(routes).sort((a, b) => a.localeCompare(b));
 }
 
 /**

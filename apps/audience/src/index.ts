@@ -101,7 +101,10 @@ export class AudienceAppController {
   constructor(sessionId: string, initialIdentity?: ParticipantIdentity) {
     this.sessionId = sessionId;
     const now = new Date().toISOString();
-    const randomSuffix = Math.random().toString(36).substring(2, 9);
+    const randomSuffix =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID().slice(0, 8)
+        : Date.now().toString(36);
     this.participant = initialIdentity ?? {
       id: `p_${randomSuffix}`,
       sessionId,
@@ -476,7 +479,11 @@ export class AudienceAppController {
         this.connected = true;
         this.wsRetryAttempt = 0;
         if (config.endpoint) {
-          await this.refreshSessionState(config.endpoint, config.fetchFn);
+          try {
+            await this.refreshSessionState(config.endpoint, config.fetchFn);
+          } catch {
+            // Error logged and handled in refreshSessionState
+          }
         }
         this.notifyListeners();
       };
@@ -644,8 +651,12 @@ export class AudienceAppController {
     // Whole-slide scoping (SPEC-006): Questions reference slideId, never individual fragment steps
     const canonicalSlideId = activeSlide.id.split(/[#/:]/)[0]!.trim();
 
+    const rand =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID().slice(0, 8)
+        : Date.now().toString(36);
     const question: AudienceQuestion = {
-      id: `q_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: `q_${Date.now()}_${rand}`,
       sessionId: this.sessionId,
       slideId: canonicalSlideId,
       participantId: this.participant.id,

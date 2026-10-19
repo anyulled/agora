@@ -90,6 +90,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     {
       cwd: rootDir,
       encoding: 'utf8',
+      env: { ...process.env, PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin' },
     },
   );
 

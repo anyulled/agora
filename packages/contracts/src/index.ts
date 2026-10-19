@@ -255,7 +255,7 @@ export interface WebSocketLike {
   send: (data: string) => void;
   close?: (code?: number, reason?: string) => void;
   addEventListener?: (type: string, listener: (event: unknown) => void) => void;
-  onopen?: ((event?: unknown) => void) | null;
+  onopen?: ((event?: unknown) => void | Promise<void>) | null;
   onmessage?: ((event: { data: unknown }) => void) | ((event: unknown) => void) | null;
   onclose?: ((event?: unknown) => void) | null;
   onerror?: ((event?: unknown) => void) | null;

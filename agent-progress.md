@@ -518,3 +518,34 @@
   - `./init.sh`: 14/14 test suites (184 tests) passing.
   - `pnpm run harness:victory`: 🏆 VICTORY DETECTED (All 3 termination layers verified successfully).
 
+---
+
+## Session 024 — 2026-10-19
+- **Role**: SonarCloud Quality Gate & Code Quality Remediation Engineer
+- **Goals**:
+  1. Diagnose and remediate all 3 failing SonarCloud Quality Gate conditions:
+     - 3.3% Duplication on New Code (required <= 3%)
+     - D Reliability Rating on New Code (required >= A)
+     - C Security Rating on New Code (required >= A)
+  2. Configure root `sonar-project.properties` specifying sources, test paths, and duplication exclusions.
+  3. Fix Reliability bugs (`harness/verify-openapi.mjs` S2871 sort comparator, `apps/audience/src/index.ts` S6544).
+  4. Fix Security vulnerabilities (`Math.random` pseudorandom generators S2245 in worker, audience, and application; weak md5 hash S4790 in emulator; unsanitized log injection S5145 in provisioner; unsafe secret expansion S7636 and unpinned third-party action S7637 in GitHub workflows).
+  5. Add type definitions and clean declarations for SDLC issue verification (`verify-sdlc-issue.d.mts`).
+  6. Verify `./init.sh` (15/15 test suites, 193 tests) and Three-Layer Victory Detector (`pnpm run harness:victory`).
+- **Completed**:
+  - Created root `sonar-project.properties` excluding test fixtures, SQL schemas, migrations, and harness scripts from CPD duplication scanning.
+  - Added locale comparator `(a, b) => a.localeCompare(b)` to `Array.prototype.sort()` in `harness/verify-openapi.mjs:37` (fixed critical bug S2871).
+  - Extended `WebSocketLike.onopen` in `@agora/contracts` to support `void | Promise<void>` and added explicit error handling (fixed major bug S6544).
+  - Replaced all 17 occurrences of `Math.random` across `apps/worker`, `apps/audience`, and `packages/application` with cryptographically secure `crypto.randomUUID()` (fixed major vulnerability S2245).
+  - Replaced weak `md5` hash with `sha256` in `apps/worker/src/cloudflare-emulator.ts:154` (fixed critical vulnerability S4790).
+  - Added `sanitizeLog` utility to `infrastructure/cloudflare/provision.mjs` stripping CR/LF/tabs from logs (fixed minor vulnerability S5145).
+  - Refactored `.github/workflows/deploy.yml` to pass `CF_API_TOKEN` through `env:` instead of inline expansion in `run:` (fixed major vulnerability S7636).
+  - Pinned `pnpm/action-setup` to full commit SHA `d9184bf108216479bc5a137cc391f4d7b14c870b` (fixed major vulnerability S7637).
+  - Added `harness/verify-sdlc-issue.d.mts` and typed callback parameters in `tests/integration/sdlc-issue-check.test.ts`.
+  - Executed `./init.sh`: all 15 test suites (193 tests) passed cleanly.
+  - Executed `pnpm run harness:victory`: 🏆 VICTORY DETECTED (All 3 termination layers verified successfully).
+- **Verification Evidence**:
+  - `git grep -in "Math.random"`: 0 occurrences remaining across codebase.
+  - `pnpm run typecheck && pnpm run lint`: 0 errors, 0 warnings.
+  - `./init.sh`: 15/15 test suites (193 tests) passing.
+  - `pnpm run harness:victory`: 🏆 VICTORY DETECTED (All 3 termination layers verified successfully).

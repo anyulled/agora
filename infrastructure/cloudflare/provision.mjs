@@ -15,6 +15,12 @@ const __dirname = path.dirname(__filename);
  * @property {typeof fetch} [fetchFn]
  */
 
+function sanitizeLog(val) {
+  return String(val ?? '')
+    .replace(/[\r\n\t]/g, ' ')
+    .trim();
+}
+
 /**
  * Idempotently provisions Cloudflare D1 database and R2 bucket,
  * then updates wrangler.toml with the resolved D1 database UUID.
@@ -41,9 +47,11 @@ export async function provisionInfrastructure(options = {}) {
   console.log('----------------------------------------------------');
   console.log(' Agora Cloudflare Infrastructure Provisioner (IaC)');
   console.log('----------------------------------------------------');
-  console.log(`Account ID: ${accountId.slice(0, 6)}...${accountId.slice(-4)}`);
-  console.log(`Target D1:  ${d1DatabaseName}`);
-  console.log(`Target R2:  ${r2BucketName}`);
+  console.log(
+    `Account ID: ${sanitizeLog(accountId.slice(0, 6))}...${sanitizeLog(accountId.slice(-4))}`,
+  );
+  console.log(`Target D1:  ${sanitizeLog(d1DatabaseName)}`);
+  console.log(`Target R2:  ${sanitizeLog(r2BucketName)}`);
   console.log('----------------------------------------------------');
 
   // 1. Provision / Resolve D1 Database
@@ -70,9 +78,11 @@ export async function provisionInfrastructure(options = {}) {
 
     if (existingD1?.uuid) {
       d1DatabaseId = existingD1.uuid;
-      console.log(`    [OK] D1 database '${d1DatabaseName}' exists. UUID: ${d1DatabaseId}`);
+      console.log(
+        `    [OK] D1 database '${sanitizeLog(d1DatabaseName)}' exists. UUID: ${sanitizeLog(d1DatabaseId)}`,
+      );
     } else {
-      console.log(`    [+] D1 database '${d1DatabaseName}' not found. Creating...`);
+      console.log(`    [+] D1 database '${sanitizeLog(d1DatabaseName)}' not found. Creating...`);
       const d1CreateRes = await fetchFn(
         `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database`,
         {
@@ -97,22 +107,22 @@ export async function provisionInfrastructure(options = {}) {
         );
       }
       console.log(
-        `    [CREATED] D1 database '${d1DatabaseName}' created with UUID: ${d1DatabaseId}`,
+        `    [CREATED] D1 database '${sanitizeLog(d1DatabaseName)}' created with UUID: ${sanitizeLog(d1DatabaseId)}`,
       );
     }
   }
 
   // 2. Provision / Resolve R2 Bucket
-  console.log(`--> Checking R2 bucket: '${r2BucketName}'...`);
+  console.log(`--> Checking R2 bucket: '${sanitizeLog(r2BucketName)}'...`);
   const r2GetRes = await fetchFn(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/buckets/${encodeURIComponent(r2BucketName)}`,
     { method: 'GET', headers },
   );
 
   if (r2GetRes.ok) {
-    console.log(`    [OK] R2 bucket '${r2BucketName}' already exists.`);
+    console.log(`    [OK] R2 bucket '${sanitizeLog(r2BucketName)}' already exists.`);
   } else if (r2GetRes.status === 404) {
-    console.log(`    [+] R2 bucket '${r2BucketName}' not found. Creating...`);
+    console.log(`    [+] R2 bucket '${sanitizeLog(r2BucketName)}' not found. Creating...`);
     const r2CreateRes = await fetchFn(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/buckets`,
       {
@@ -128,7 +138,7 @@ export async function provisionInfrastructure(options = {}) {
         `Failed to create Cloudflare R2 bucket (status ${r2CreateRes.status}): ${errorText}`,
       );
     }
-    console.log(`    [CREATED] R2 bucket '${r2BucketName}' successfully created.`);
+    console.log(`    [CREATED] R2 bucket '${sanitizeLog(r2BucketName)}' successfully created.`);
   } else {
     const errorText = await r2GetRes.text();
     if (r2GetRes.status === 403 && errorText.includes('Please enable R2')) {
@@ -159,7 +169,9 @@ export async function provisionInfrastructure(options = {}) {
 
   const requestedSubdomain = options.workersSubdomain || process.env.CLOUDFLARE_WORKERS_SUBDOMAIN;
   if (!workersSubdomain && requestedSubdomain) {
-    console.log(`    [+] Registering requested workers.dev subdomain: '${requestedSubdomain}'...`);
+    console.log(
+      `    [+] Registering requested workers.dev subdomain: '${sanitizeLog(requestedSubdomain)}'...`,
+    );
     try {
       const putSubdomainRes = await fetchFn(
         `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/subdomain`,
@@ -172,11 +184,13 @@ export async function provisionInfrastructure(options = {}) {
       if (putSubdomainRes.ok) {
         workersSubdomain = requestedSubdomain;
         console.log(
-          `    [CREATED] Registered workers.dev subdomain: ${workersSubdomain}.workers.dev`,
+          `    [CREATED] Registered workers.dev subdomain: ${sanitizeLog(workersSubdomain)}.workers.dev`,
         );
       } else {
         const errText = await putSubdomainRes.text();
-        console.warn(`    [WARN] Could not register workers.dev subdomain: ${errText}`);
+        console.warn(
+          `    [WARN] Could not register workers.dev subdomain: ${sanitizeLog(errText).slice(0, 200)}`,
+        );
       }
     } catch {
       // Ignore
@@ -184,9 +198,9 @@ export async function provisionInfrastructure(options = {}) {
   }
 
   if (workersSubdomain) {
-    console.log(`    [OK] workers.dev subdomain: ${workersSubdomain}.workers.dev`);
+    console.log(`    [OK] workers.dev subdomain: ${sanitizeLog(workersSubdomain)}.workers.dev`);
     console.log(
-      `    [URL] Worker URL will be: https://agora-worker.${workersSubdomain}.workers.dev`,
+      `    [URL] Worker URL will be: https://agora-worker.${sanitizeLog(workersSubdomain)}.workers.dev`,
     );
   } else {
     console.log(
@@ -201,7 +215,7 @@ export async function provisionInfrastructure(options = {}) {
   }
 
   // 4. Update wrangler.toml with resolved database_id
-  console.log(`--> Synchronizing wrangler configuration at ${wranglerPath}...`);
+  console.log(`--> Synchronizing wrangler configuration at ${sanitizeLog(wranglerPath)}...`);
   if (!fs.existsSync(wranglerPath)) {
     throw new Error(`Wrangler configuration file not found at: ${wranglerPath}`);
   }
@@ -216,7 +230,7 @@ export async function provisionInfrastructure(options = {}) {
   const updatedWrangler = rawWrangler.replace(d1Regex, `database_id = '${d1DatabaseId}'`);
   fs.writeFileSync(wranglerPath, updatedWrangler, 'utf8');
   console.log(
-    `    [UPDATED] Set database_id = '${d1DatabaseId}' in ${path.basename(wranglerPath)}`,
+    `    [UPDATED] Set database_id = '${sanitizeLog(d1DatabaseId)}' in ${sanitizeLog(path.basename(wranglerPath))}`,
   );
 
   // 4. Export to GITHUB_ENV if running in GitHub Actions CI

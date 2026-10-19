@@ -55,7 +55,7 @@ class MakerCheckerGraph {
     let harnessClean = false;
 
     try {
-      execSync('node harness/verify-architecture.mjs', {
+      execSync(`"${process.execPath}" harness/verify-architecture.mjs`, {
         cwd: rootDir,
         stdio: 'pipe',
       });
@@ -65,7 +65,7 @@ class MakerCheckerGraph {
     }
 
     try {
-      execSync('node harness/validate-harness.mjs', {
+      execSync(`"${process.execPath}" harness/validate-harness.mjs`, {
         cwd: rootDir,
         stdio: 'pipe',
       });
