@@ -151,4 +151,29 @@ bucket_name = 'agora-assets'
     const updatedContent = fs.readFileSync(testWranglerPath, 'utf8');
     expect(updatedContent).toContain("database_id = 'd1-uuid-existing-9999'");
   });
+
+  it('uses explicit d1DatabaseId directly when provided', async () => {
+    const mockFetch = async (input: RequestInfo | URL): Promise<Response> => {
+      const url = String(input);
+      if (url.includes('/r2/buckets/agora-assets')) {
+        return new Response(JSON.stringify({ result: { name: 'agora-assets' }, success: true }), {
+          status: 200,
+        });
+      }
+      return new Response('Not Found', { status: 404 });
+    };
+
+    const result = await provisionInfrastructure({
+      accountId: 'test-account-123',
+      apiToken: 'test-token-456',
+      d1DatabaseId: 'explicit-uuid-5555',
+      r2BucketName: 'agora-assets',
+      wranglerPath: testWranglerPath,
+      fetchFn: mockFetch as typeof fetch,
+    });
+
+    expect(result.d1DatabaseId).toBe('explicit-uuid-5555');
+    const updatedContent = fs.readFileSync(testWranglerPath, 'utf8');
+    expect(updatedContent).toContain("database_id = 'explicit-uuid-5555'");
+  });
 });

@@ -47,52 +47,59 @@ export async function provisionInfrastructure(options = {}) {
   console.log('----------------------------------------------------');
 
   // 1. Provision / Resolve D1 Database
-  let d1DatabaseId = null;
-  console.log(`--> Checking D1 database: '${d1DatabaseName}'...`);
-  const d1ListRes = await fetchFn(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database`,
-    { method: 'GET', headers },
-  );
+  let d1DatabaseId = options.d1DatabaseId || process.env.CLOUDFLARE_D1_DATABASE_ID || null;
 
-  if (!d1ListRes.ok) {
-    const errorText = await d1ListRes.text();
-    throw new Error(
-      `Failed to query Cloudflare D1 databases (status ${d1ListRes.status}): ${errorText}`,
-    );
-  }
-
-  const d1ListData = await d1ListRes.json();
-  const existingD1 = (d1ListData.result || []).find((item) => item.name === d1DatabaseName);
-
-  if (existingD1?.uuid) {
-    d1DatabaseId = existingD1.uuid;
-    console.log(`    [OK] D1 database '${d1DatabaseName}' exists. UUID: ${d1DatabaseId}`);
+  if (d1DatabaseId) {
+    console.log(`--> Using provided D1 database ID: ${d1DatabaseId}`);
   } else {
-    console.log(`    [+] D1 database '${d1DatabaseName}' not found. Creating...`);
-    const d1CreateRes = await fetchFn(
+    console.log(`--> Checking D1 database: '${d1DatabaseName}'...`);
+    const d1ListRes = await fetchFn(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database`,
-      {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ name: d1DatabaseName }),
-      },
+      { method: 'GET', headers },
     );
 
-    if (!d1CreateRes.ok) {
-      const errorText = await d1CreateRes.text();
+    if (!d1ListRes.ok) {
+      const errorText = await d1ListRes.text();
       throw new Error(
-        `Failed to create Cloudflare D1 database (status ${d1CreateRes.status}): ${errorText}`,
+        `Failed to query Cloudflare D1 databases (status ${d1ListRes.status}): ${errorText}`,
       );
     }
 
-    const d1CreateData = await d1CreateRes.json();
-    d1DatabaseId = d1CreateData.result?.uuid;
-    if (!d1DatabaseId) {
-      throw new Error(
-        `Cloudflare D1 creation succeeded but no UUID was returned: ${JSON.stringify(d1CreateData)}`,
+    const d1ListData = await d1ListRes.json();
+    const existingD1 = (d1ListData.result || []).find((item) => item.name === d1DatabaseName);
+
+    if (existingD1?.uuid) {
+      d1DatabaseId = existingD1.uuid;
+      console.log(`    [OK] D1 database '${d1DatabaseName}' exists. UUID: ${d1DatabaseId}`);
+    } else {
+      console.log(`    [+] D1 database '${d1DatabaseName}' not found. Creating...`);
+      const d1CreateRes = await fetchFn(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ name: d1DatabaseName }),
+        },
+      );
+
+      if (!d1CreateRes.ok) {
+        const errorText = await d1CreateRes.text();
+        throw new Error(
+          `Failed to create Cloudflare D1 database (status ${d1CreateRes.status}): ${errorText}`,
+        );
+      }
+
+      const d1CreateData = await d1CreateRes.json();
+      d1DatabaseId = d1CreateData.result?.uuid;
+      if (!d1DatabaseId) {
+        throw new Error(
+          `Cloudflare D1 creation succeeded but no UUID was returned: ${JSON.stringify(d1CreateData)}`,
+        );
+      }
+      console.log(
+        `    [CREATED] D1 database '${d1DatabaseName}' created with UUID: ${d1DatabaseId}`,
       );
     }
-    console.log(`    [CREATED] D1 database '${d1DatabaseName}' created with UUID: ${d1DatabaseId}`);
   }
 
   // 2. Provision / Resolve R2 Bucket
