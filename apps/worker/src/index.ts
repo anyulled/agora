@@ -2133,68 +2133,38 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       return jsonResponse(poll, 201);
     }
 
-    // 17c. POST /api/v1/sessions/:id/polls/:pollId/open (Presenter opens poll)
-    const pollOpenMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)\/polls\/([^/]+)\/open$/);
-    if (method === 'POST' && pollOpenMatch) {
-      const sessionId = pollOpenMatch[1]!;
-      const pollId = pollOpenMatch[2]!;
-      if (!authorizePresenter(request, sessionId)) {
+    // 17c-d. POST /api/v1/sessions/:id/polls/:pollId/{open|close}
+    const pollStatusMatch = path.match(
+      /^\/api\/v1\/sessions\/([^/]+)\/polls\/([^/]+)\/(open|close)$/,
+    );
+    if (method === 'POST' && pollStatusMatch) {
+      const [, sessionId, pollId, action] = pollStatusMatch;
+      if (!authorizePresenter(request, sessionId!)) {
         return errorResponse('Unauthorized: Presenter authentication required', 403);
       }
-
-      if (!(await hydrateSessionFromDO(env, sessionId))) {
+      if (!(await hydrateSessionFromDO(env, sessionId!))) {
         return errorResponse('Session not found', 404);
       }
 
-      const pollList = store.polls.get(sessionId) || [];
-      const poll = pollList.find((p) => p.id === pollId);
-      if (!poll) {
-        return errorResponse('Poll not found', 404);
-      }
+      const poll = store.polls.get(sessionId!)?.find((item) => item.id === pollId);
+      if (!poll) return errorResponse('Poll not found', 404);
 
-      poll.status = 'open';
+      poll.status = action === 'open' ? 'open' : 'closed';
       persistPollToDO(env, poll);
-
-      broadcastRealtimeEvent(sessionId, 'poll.opened', {
-        pollId: poll.id,
-        slideId: poll.slideId,
-        question: poll.question,
-        options: poll.options,
-        type: poll.type,
-        status: 'open',
-        resultsRevealed: poll.resultsRevealed,
-      });
-
-      return jsonResponse(poll);
-    }
-
-    // 17d. POST /api/v1/sessions/:id/polls/:pollId/close (Presenter closes poll)
-    const pollCloseMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)\/polls\/([^/]+)\/close$/);
-    if (method === 'POST' && pollCloseMatch) {
-      const sessionId = pollCloseMatch[1]!;
-      const pollId = pollCloseMatch[2]!;
-      if (!authorizePresenter(request, sessionId)) {
-        return errorResponse('Unauthorized: Presenter authentication required', 403);
-      }
-
-      if (!(await hydrateSessionFromDO(env, sessionId))) {
-        return errorResponse('Session not found', 404);
-      }
-
-      const pollList = store.polls.get(sessionId) || [];
-      const poll = pollList.find((p) => p.id === pollId);
-      if (!poll) {
-        return errorResponse('Poll not found', 404);
-      }
-
-      poll.status = 'closed';
-      persistPollToDO(env, poll);
-
-      broadcastRealtimeEvent(sessionId, 'poll.closed', {
-        pollId: poll.id,
-        status: 'closed',
-      });
-
+      const eventType = action === 'open' ? 'poll.opened' : 'poll.closed';
+      const eventPayload =
+        action === 'open'
+          ? {
+              pollId: poll.id,
+              slideId: poll.slideId,
+              question: poll.question,
+              options: poll.options,
+              type: poll.type,
+              status: 'open',
+              resultsRevealed: poll.resultsRevealed,
+            }
+          : { pollId: poll.id, status: 'closed' };
+      broadcastRealtimeEvent(sessionId!, eventType, eventPayload);
       return jsonResponse(poll);
     }
 
