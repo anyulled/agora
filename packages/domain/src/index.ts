@@ -585,17 +585,10 @@ export function canDownloadFullPdf(
 }
 
 function stripHtml(input: string): string {
-  let prev = '';
-  let curr = input;
-  while (curr !== prev) {
-    prev = curr;
-    curr = curr
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, '')
-      .replace(/<[^>]*>/g, '')
-      .replace(/(?:javascript|vbscript|data):/gi, '');
-  }
-  return curr.trim();
+  return input
+    .replace(/<|>/g, '')
+    .replace(/(?:javascript|vbscript|data):/gi, '')
+    .trim();
 }
 
 /**
