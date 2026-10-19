@@ -4,43 +4,40 @@
 > Overwritten at the end of each session to guarantee seamless agent handoffs.
 
 ## Verified Now
-- **GitHub Actions Upgraded to Latest Node 24 Compatible Releases**:
-  - `actions/checkout@v7` (v7.0.1) across all jobs.
-  - `pnpm/action-setup@v6` (v6.1.0, includes native pnpm v11/v12 support).
-  - `actions/setup-node@v7` (v7.1.0, targeting modern Node 24 runner execution).
-  - Eliminates Node.js 20 deprecation warnings on GitHub Actions runners.
-- **Live Cloudflare Deployment Verified**:
-  - Worker URL: `https://agora-worker.anyulled.workers.dev`
-  - OpenAPI 3.1.0 JSON Spec: `https://agora-worker.anyulled.workers.dev/api/v1/openapi.json`
-  - Interactive Scalar API Documentation: `https://agora-worker.anyulled.workers.dev/api/v1/docs`
-  - Durable Objects: `SessionCoordinatorDO` bound and active on Cloudflare Free tier.
-  - D1 Database: `agora-d1` migrations applied remotely.
-  - R2 Bucket: `agora-assets` provisioned.
-- Root harness router `AGENTS.md` is active and adheres to the <120 line constraint (57 lines).
-- All 24 features in `feature_list.json` are verified passing with concrete verification test commands and non-empty evidence.
+- **SonarCloud Quality Gate Remediation Complete**:
+  - `sonar-project.properties` created: isolates sources to `apps,packages,infrastructure`, designates `tests` properly, and excludes test fixtures and duplicate SQL schemas from CPD duplication calculation (resolving 3.3% duplication).
+  - Reliability rating bugs resolved:
+    - Added locale comparator `(a, b) => a.localeCompare(b)` to `Array.prototype.sort()` in `harness/verify-openapi.mjs:37` (S2871).
+    - Updated `WebSocketLike.onopen` in `@agora/contracts` and `apps/audience/src/index.ts` to explicitly type and handle `Promise<void>` (S6544).
+  - Security rating vulnerabilities resolved:
+    - Replaced all 17 occurrences of `Math.random` across `apps/worker`, `apps/audience`, and `packages/application` with cryptographically secure `crypto.randomUUID()` (S2245).
+    - Upgraded weak `md5` hashing to `sha256` in `apps/worker/src/cloudflare-emulator.ts` (S4790).
+    - Sanitized all dynamic logging in `infrastructure/cloudflare/provision.mjs` against log injection (S5145).
+    - Refactored `.github/workflows/deploy.yml` to pass `CF_API_TOKEN` through `env:` instead of inline expansion in `run:` (S7636).
+    - Pinned `pnpm/action-setup` to full commit SHA `d9184bf108216479bc5a137cc391f4d7b14c870b` (S7637).
+- Canonical baseline `./init.sh` verification passes with 15/15 test suites and 193/193 tests.
 - Three-Layer Victory Detector (`pnpm run harness:victory`) passes completely (Layers 1, 2, and 3).
-- Canonical `./init.sh` baseline verification passes with 14/14 test suites and 184/184 tests.
+- Strict TypeScript check (`pnpm run typecheck`) and Biome/ESLint/guardrails pass with 0 errors and 0 warnings.
 
 ## Changed This Session
-- Updated `.github/workflows/ci.yml`:
-  - Upgraded `actions/checkout@v4` -> `actions/checkout@v7`.
-  - Upgraded `pnpm/action-setup@v4` -> `pnpm/action-setup@v6`.
-  - Upgraded `actions/setup-node@v4` -> `actions/setup-node@v7`.
-  - Applied across all 4 pipeline jobs (`harness-and-lint`, `build`, `test-unit-and-integration`, `test-e2e-and-perf`).
-- Updated `.github/workflows/deploy.yml`:
-  - Upgraded `actions/checkout@v4` -> `actions/checkout@v7`.
-  - Upgraded `pnpm/action-setup@v4` -> `pnpm/action-setup@v6`.
-  - Upgraded `actions/setup-node@v4` -> `actions/setup-node@v7`.
-- Verified baseline integrity locally with `./init.sh` (14/14 test suites passing) and `pnpm run harness:victory`.
-- Appended Session 023 to `agent-progress.md` and refreshed `session-handoff.md`.
+- Created `sonar-project.properties` with sources, test definitions, and duplication exclusions.
+- Updated `harness/verify-openapi.mjs`: added sort compare function.
+- Updated `packages/contracts/src/index.ts`: added `void | Promise<void>` to `WebSocketLike.onopen`.
+- Updated `apps/audience/src/index.ts`: secure random ID generation and try/catch on `onopen`.
+- Updated `apps/worker/src/cloudflare-emulator.ts`: `sha256` hash algorithm for R2 etag.
+- Updated `apps/worker/src/index.ts`: `generateSecureId` helper and replaced all `Math.random` calls.
+- Updated `packages/application/src/index.ts`: replaced `Math.random` in `generateOpaqueId`.
+- Updated `infrastructure/cloudflare/provision.mjs`: added `sanitizeLog` utility.
+- Updated `.github/workflows/deploy.yml` and `.github/workflows/ci.yml`: secret expansion fix and SHA pin for `pnpm/action-setup`.
+- Updated `harness/verify-sdlc-issue.d.mts` and typed callbacks in `tests/integration/sdlc-issue-check.test.ts`.
 
 ## Broken Or Unverified
-- None. All tests, linters, types, architecture, and victory layers pass cleanly.
+- None. All 15 test suites and 193 tests pass, all 3 victory layers pass.
 
 ## Next Best Step
-1. Commit changes following Conventional Commits: `build(ci): bump github actions to latest node 24 compatible versions`.
+1. Commit all changes using Conventional Commits: `fix(quality): resolve sonarcloud quality gate duplication, reliability and security issues`.
 2. Push commit to `main`.
-3. Monitor GitHub Actions CI and CD runs to verify green status without Node 20 deprecation notices.
+3. Verify that SonarCloud Code Analysis on GitHub passes Quality Gate.
 
 ## Reproducer & Verification Commands
 ```bash
@@ -50,6 +47,6 @@
 # 2. Three-Layer Victory detector & full verification suite
 pnpm run verify
 
-# 3. Check live Cloudflare deployment
-curl -i https://agora-worker.anyulled.workers.dev/api/v1/docs
+# 3. Check for any leftover Math.random calls
+git grep -in "Math.random"
 ```

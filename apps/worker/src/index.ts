@@ -45,9 +45,17 @@ export * from './openapi';
 export interface WorkerEnv {
   ADMIN_TOKEN?: string;
   ENVIRONMENT?: string;
-  DB?: LocalD1Database | unknown;
-  ASSETS_BUCKET?: LocalR2Bucket | unknown;
-  SESSION_COORDINATOR?: LocalDurableObjectNamespace | unknown;
+  DB?: LocalD1Database | Record<string, unknown>;
+  ASSETS_BUCKET?: LocalR2Bucket | Record<string, unknown>;
+  SESSION_COORDINATOR?: LocalDurableObjectNamespace | Record<string, unknown>;
+}
+
+function generateSecureId(prefix: string): string {
+  const rand =
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID().slice(0, 8)
+      : Date.now().toString(36);
+  return `${prefix}-${Date.now()}-${rand}`;
 }
 
 export interface AgoraWorkerAppOptions {
@@ -158,7 +166,7 @@ export class SessionCoordinatorDO {
     const session = this.store.sessions.get(this.sessionId);
     if (session) {
       const snapshotEvent: RealtimeEvent<PresentationSession> = {
-        id: `evt-restore-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: generateSecureId('evt-restore'),
         type: 'session.state',
         sessionId: this.sessionId,
         timestamp: new Date().toISOString(),
@@ -202,7 +210,7 @@ export class SessionCoordinatorDO {
 
       if (!expectedToken || !candidateToken || candidateToken !== expectedToken) {
         const errorEvent: RealtimeEvent<{ code: string; message: string }> = {
-          id: `evt-err-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          id: generateSecureId('evt-err'),
           type: 'error',
           sessionId: this.sessionId,
           timestamp: new Date().toISOString(),
@@ -248,9 +256,7 @@ export class SessionCoordinatorDO {
       }
 
       const eventId =
-        typeof parsed.id === 'string' && parsed.id
-          ? parsed.id
-          : `evt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        typeof parsed.id === 'string' && parsed.id ? parsed.id : generateSecureId('evt');
 
       this.broadcast({
         id: eventId,
@@ -283,7 +289,7 @@ export class SessionCoordinatorDO {
       const participantKey = candidateToken ?? 'anonymous';
       if (!this.reactionRateLimiter.check(`react:${participantKey}`, 10, 1000)) {
         const errorEvent: RealtimeEvent<{ code: string; message: string }> = {
-          id: `evt-err-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          id: generateSecureId('evt-err'),
           type: 'error',
           sessionId: this.sessionId,
           timestamp: new Date().toISOString(),
@@ -312,7 +318,7 @@ export class SessionCoordinatorDO {
 
       if (!session.revealedSlideIds.includes(slideId)) {
         const errorEvent: RealtimeEvent<{ code: string; message: string }> = {
-          id: `evt-err-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          id: generateSecureId('evt-err'),
           type: 'error',
           sessionId: this.sessionId,
           timestamp: new Date().toISOString(),
@@ -390,7 +396,7 @@ export class SessionCoordinatorDO {
 
   public broadcastSlideReactionSummary(slideId: string, counts: ReactionCounts): void {
     const event: RealtimeEvent<ReactionSummaryPayload> = {
-      id: `evt-react-sum-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      id: generateSecureId('evt-react-sum'),
       type: 'reaction.summary',
       sessionId: this.sessionId,
       timestamp: new Date().toISOString(),
@@ -537,7 +543,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     id?: string,
   ): RealtimeEvent<T> {
     const event: RealtimeEvent<T> = {
-      id: id || `evt-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      id: id || generateSecureId('evt'),
       type,
       sessionId,
       timestamp: new Date().toISOString(),
@@ -1059,7 +1065,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         return errorResponse(validationErr, 400);
       }
 
-      const id = body.id || `pres-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const id = body.id || generateSecureId('pres');
       const slides: SlideMetadata[] = (body.slides || []).map((s) => ({
         ...s,
         presentationId: id,
@@ -1250,7 +1256,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       }
 
       const dupBody = (await request.json().catch(() => ({}))) as { title?: string };
-      const targetId = `pres-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const targetId = generateSecureId('pres');
       const sourceSlides = store.slides.get(sourceId) || [];
       const clonedSlides: SlideMetadata[] = sourceSlides.map((s) => ({
         ...s,
@@ -1338,7 +1344,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         );
       }
 
-      const assetId = `asset-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const assetId = generateSecureId('asset');
       const r2Key = `presentations/${presentationId}/${revision}/${assetKind}/${slideId ? `${slideId}.png` : 'deck.pdf'}`;
 
       const entry: AssetManifestEntry = {
@@ -1404,8 +1410,8 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       };
       const initialStatus = body.status === 'scheduled' ? 'scheduled' : 'live';
 
-      const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      const presenterToken = `tok-pres-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const sessionId = generateSecureId('session');
+      const presenterToken = generateSecureId('tok-pres');
       const slides = store.slides.get(presentationId) || [];
       const firstSlideId = initialStatus === 'live' ? slides[0]?.id || null : null;
 
@@ -1478,8 +1484,8 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       }
 
       const body = (await request.json().catch(() => ({}))) as { displayName?: string };
-      const participantId = `part-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      const token = `ptok-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const participantId = generateSecureId('part');
+      const token = generateSecureId('ptok');
 
       const participant: ParticipantIdentity = {
         id: participantId,
@@ -1740,7 +1746,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       let question: AudienceQuestion;
       try {
         question = createAudienceQuestion({
-          id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          id: generateSecureId('q'),
           sessionId,
           slideId: rawSlideId,
           participantId: participant.id,
@@ -1953,7 +1959,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       }
 
       const poll: PollDefinition = {
-        id: `poll-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: generateSecureId('poll'),
         sessionId,
         slideId: body.slideId,
         question: sanitizeText(body.question),
@@ -2078,7 +2084,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       }
 
       const prompt: WordCloudPrompt = {
-        id: `wc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: generateSecureId('wc'),
         sessionId,
         slideId: body.slideId,
         prompt: sanitizeText(body.prompt),

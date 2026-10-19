@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v7
@@ -43,8 +43,10 @@ jobs:
 
       - name: Check Cloudflare Secret Configuration
         id: check-secrets
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          if [ -n "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
+          if [ -n "$CF_API_TOKEN" ]; then
             echo "has_token=true" >> "$GITHUB_OUTPUT"
             echo "Cloudflare API token detected. Proceeding with deployment."
           else

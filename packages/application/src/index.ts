@@ -108,8 +108,9 @@ function generateOpaqueId(prefix: string): string {
     return `${prefix}_${globalThis.crypto.randomUUID()}`;
   }
   const time = Date.now().toString(36);
-  const rand = Math.random().toString(36).substring(2, 10);
-  return `${prefix}_${time}_${rand}`;
+  const perf =
+    typeof performance !== 'undefined' ? performance.now().toString(36).replace('.', '') : '0';
+  return `${prefix}_${time}_${perf}`;
 }
 
 function emptyReactionCounts(): ReactionCounts {

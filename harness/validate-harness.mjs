@@ -46,11 +46,13 @@ const requiredSubsystemFiles = [
   'harness/verify-mermaid.mjs',
   'harness/verify-openapi.mjs',
   'harness/verify-commit-msg.mjs',
+  'harness/verify-sdlc-issue.mjs',
   'harness/victory-detector.mjs',
   'docs/openapi.json',
   'sops/jscpd-dry-refactoring.md',
   '.githooks/pre-commit',
   '.githooks/commit-msg',
+  '.github/pull_request_template.md',
 ];
 
 console.log('--> Checking 5 Harness Subsystems...');
