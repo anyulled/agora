@@ -1,10 +1,13 @@
-import type {
-  AssetManifest,
-  AssetManifestEntry,
-  Presentation,
-  PresentationBranding,
-  PresentationSession,
-  SlideMetadata,
+import {
+  type AssetManifest,
+  type AssetManifestEntry,
+  type NavigationRule,
+  type Presentation,
+  type PresentationBranding,
+  type PresentationSession,
+  type SlideMetadata,
+  escapeHtml,
+  safeUrlAttribute,
 } from '@agora/contracts';
 
 export interface CreateSlideInput {
@@ -33,6 +36,8 @@ export interface UpdatePresentationParams {
   branding?: PresentationBranding;
   endingSlideId?: string;
 }
+
+export type NavigationRuleInput = Omit<NavigationRule, 'id' | 'presentationId'>;
 
 export interface DeleteModalState {
   isOpen: boolean;
@@ -95,6 +100,7 @@ export interface AdminDashboardViewModel {
 export class AdminAppController {
   private presentations = new Map<string, Presentation>();
   private manifests = new Map<string, AssetManifest>();
+  private navigationRules = new Map<string, NavigationRule[]>();
   private activeSessions = new Map<string, PresentationSession>();
   private deleteModalState: DeleteModalState = {
     isOpen: false,
@@ -149,6 +155,7 @@ export class AdminAppController {
       revision: presentation.revision,
       slidePngs: {},
     });
+    this.navigationRules.set(id, []);
 
     return presentation;
   }
@@ -163,6 +170,59 @@ export class AdminAppController {
 
   getAssetManifest(presentationId: string): AssetManifest | null {
     return this.manifests.get(presentationId) ?? null;
+  }
+
+  getNavigationRules(presentationId: string): NavigationRule[] {
+    return (this.navigationRules.get(presentationId) ?? []).map((rule) => ({ ...rule }));
+  }
+
+  addNavigationRule(presentationId: string, input: NavigationRuleInput): NavigationRule {
+    const presentation = this.presentations.get(presentationId);
+    if (!presentation) throw new Error(`Presentation ${presentationId} not found`);
+
+    const sourceSlide = presentation.slides?.find((slide) => slide.id === input.sourceSlideId);
+    const targetSlide = presentation.slides?.find((slide) => slide.id === input.targetSlideId);
+    if (!sourceSlide || !targetSlide) {
+      throw new Error('Navigation rules must reference slides in the presentation');
+    }
+    if (
+      targetSlide.horizontalIndex !== input.targetHorizontalIndex ||
+      targetSlide.verticalIndex !== input.targetVerticalIndex
+    ) {
+      throw new Error('Navigation rule coordinates must match the destination slide');
+    }
+    if (!Number.isInteger(input.minVoteThreshold) || input.minVoteThreshold < 1) {
+      throw new Error('Navigation rule minVoteThreshold must be a positive integer');
+    }
+    if (
+      input.minPercentageThreshold !== undefined &&
+      (!Number.isFinite(input.minPercentageThreshold) ||
+        input.minPercentageThreshold < 0 ||
+        input.minPercentageThreshold > 100)
+    ) {
+      throw new Error('Navigation rule minPercentageThreshold must be between 0 and 100');
+    }
+
+    const rule: NavigationRule = {
+      id: this.generateId('nav_rule'),
+      presentationId,
+      ...input,
+    };
+    const rules = this.navigationRules.get(presentationId) ?? [];
+    rules.push(rule);
+    this.navigationRules.set(presentationId, rules);
+    return { ...rule };
+  }
+
+  removeNavigationRule(presentationId: string, ruleId: string): void {
+    const rules = this.navigationRules.get(presentationId);
+    if (!rules?.some((rule) => rule.id === ruleId)) {
+      throw new Error(`Navigation rule ${ruleId} not found in presentation ${presentationId}`);
+    }
+    this.navigationRules.set(
+      presentationId,
+      rules.filter((rule) => rule.id !== ruleId),
+    );
   }
 
   updatePresentation(id: string, updates: UpdatePresentationParams): Presentation {
@@ -197,6 +257,12 @@ export class AdminAppController {
     }
 
     Object.assign(slide, updates);
+    for (const rule of this.navigationRules.get(presentationId) ?? []) {
+      if (rule.targetSlideId === slideId) {
+        rule.targetHorizontalIndex = slide.horizontalIndex;
+        rule.targetVerticalIndex = slide.verticalIndex;
+      }
+    }
 
     // SPEC-001 & SPEC-015: Editing slide metadata triggers revision bump & flags stale assets
     const prevRevNum = Number.parseInt(presentation.revision.replace('rev_', ''), 10) || 1;
@@ -318,6 +384,7 @@ export class AdminAppController {
 
     this.presentations.delete(id);
     this.manifests.delete(id);
+    this.navigationRules.delete(id);
     this.activeSessions.delete(id);
     this.cancelDeletePresentation();
 
@@ -610,29 +677,29 @@ export function renderAdminDashboardHtml(state: AdminDashboardViewModel): string
     .map((p) => {
       const activeSession = state.activeSessionsByPresentationId[p.id];
       const sessionBadge = activeSession
-        ? `<span class="badge badge-live">${activeSession.status.toUpperCase()} (${activeSession.id})</span>`
-        : `<span class="badge badge-draft">${p.status}</span>`;
+        ? `<span class="badge badge-live">${escapeHtml(activeSession.status.toUpperCase())} (${escapeHtml(activeSession.id)})</span>`
+        : `<span class="badge badge-draft">${escapeHtml(p.status)}</span>`;
 
       const sessionJoinHtml = activeSession
-        ? `<div class="session-join-info" data-session-id="${activeSession.id}">
-            <p class="session-join-link">Join URL: <a href="${activeSession.audienceUrl ?? ''}" class="session-join-url">${activeSession.audienceUrl ?? ''}</a></p>
-            ${activeSession.qrCodeDataUrl ? `<img src="${activeSession.qrCodeDataUrl}" alt="Join QR code for ${p.title}" class="session-qr-code" />` : ''}
+        ? `<div class="session-join-info" data-session-id="${escapeHtml(activeSession.id)}">
+            <p class="session-join-link">Join URL: <a href="${safeUrlAttribute(activeSession.audienceUrl ?? null)}" class="session-join-url">${escapeHtml(activeSession.audienceUrl ?? '')}</a></p>
+            ${activeSession.qrCodeDataUrl ? `<img src="${safeUrlAttribute(activeSession.qrCodeDataUrl, true)}" alt="Join QR code for ${escapeHtml(p.title)}" class="session-qr-code" />` : ''}
           </div>`
         : '';
 
       return `
-      <article class="card presentation-card" data-presentation-id="${p.id}">
+      <article class="card presentation-card" data-presentation-id="${escapeHtml(p.id)}">
         <div class="card-header">
-          <h3>${p.title}</h3>
+          <h3>${escapeHtml(p.title)}</h3>
           ${sessionBadge}
         </div>
-        <p class="revision-label">Revision: <strong>${p.revision}</strong> | Slides: ${p.slides?.length ?? 0}</p>
+        <p class="revision-label">Revision: <strong>${escapeHtml(p.revision)}</strong> | Slides: ${p.slides?.length ?? 0}</p>
         ${sessionJoinHtml}
         <div class="button-group">
-          <button class="btn-primary" data-action="start-session" data-id="${p.id}">Start Live Session</button>
-          <button class="btn-secondary" data-action="generate-images" data-id="${p.id}">Generate Images</button>
-          <button class="btn-secondary" data-action="duplicate" data-id="${p.id}">Duplicate</button>
-          <button class="btn-danger" data-action="request-delete" data-id="${p.id}">Delete</button>
+          <button class="btn-primary" data-action="start-session" data-id="${escapeHtml(p.id)}">Start Live Session</button>
+          <button class="btn-secondary" data-action="generate-images" data-id="${escapeHtml(p.id)}">Generate All Slide Images</button>
+          <button class="btn-secondary" data-action="duplicate" data-id="${escapeHtml(p.id)}">Duplicate</button>
+          <button class="btn-danger" data-action="request-delete" data-id="${escapeHtml(p.id)}">Delete</button>
         </div>
       </article>`;
     })
@@ -699,10 +766,10 @@ export function renderDeleteConfirmationModalHtml(modalState: DeleteModalState):
     <div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title">
       <div class="modal-content">
         <h3 id="delete-dialog-title">Confirm Deletion</h3>
-        <p>Are you sure you want to delete <strong>${modalState.presentationTitle ?? 'this presentation'}</strong>? This action is permanent and cannot be undone.</p>
+        <p>Are you sure you want to delete <strong>${escapeHtml(modalState.presentationTitle ?? 'this presentation')}</strong>? This action is permanent and cannot be undone.</p>
         <div class="button-group modal-actions">
           <button class="btn-secondary" data-action="cancel-delete">Cancel</button>
-          <button class="btn-danger" data-action="confirm-delete" data-id="${modalState.presentationId ?? ''}">Delete Presentation</button>
+          <button class="btn-danger" data-action="confirm-delete" data-id="${escapeHtml(modalState.presentationId ?? '')}">Delete Presentation</button>
         </div>
       </div>
     </div>`;
@@ -714,17 +781,17 @@ export function renderAssetPreviewHtml(preview: AssetPreviewModel): string {
       (s) => `
       <div class="asset-preview-item ${s.hasPng ? 'status-ready' : 'status-missing'}">
         <div class="preview-header">
-          <strong>${s.slide.title}</strong>
+          <strong>${escapeHtml(s.slide.title)}</strong>
           <span class="badge">${s.hasPng ? 'PNG Ready' : 'PNG Missing'}</span>
         </div>
-        ${s.hasPng ? `<img src="/assets/${s.pngEntry?.r2Key ?? ''}" alt="${s.slide.title}" class="slide-thumbnail" />` : '<div class="thumbnail-placeholder">No Image</div>'}
+        ${s.hasPng ? `<img src="${safeUrlAttribute(`/assets/${s.pngEntry?.r2Key ?? ''}`)}" alt="${escapeHtml(s.slide.title)}" class="slide-thumbnail" />` : '<div class="thumbnail-placeholder">No Image</div>'}
       </div>`,
     )
     .join('');
 
   return `
     <div class="asset-preview-view">
-      <h3>Asset Preview for "${preview.title}" (${preview.revision})</h3>
+      <h3>Asset Preview for "${escapeHtml(preview.title)}" (${escapeHtml(preview.revision)})</h3>
       <div class="pdf-status-banner ${preview.isPdfStale ? 'banner-stale' : 'banner-ready'}">
         <strong>Deck PDF:</strong> ${preview.isPdfStale ? 'Stale or not uploaded' : 'Up to date with current revision'}
       </div>

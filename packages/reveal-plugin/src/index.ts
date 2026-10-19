@@ -1,4 +1,10 @@
-import type { AudienceQuestion, WebSocketLike } from '@agora/contracts';
+import {
+  type AudienceQuestion,
+  type PollDefinition,
+  type PollResultsSummary,
+  type WebSocketLike,
+  processPollRealtimeEvent,
+} from '@agora/contracts';
 
 export type { WebSocketLike };
 
@@ -61,7 +67,10 @@ export function buildSessionWebSocketUrl(
   sessionId: string,
   presenterToken?: string,
 ): string {
-  const trimmed = endpoint.replace(/\/+$/, '');
+  let trimmed = endpoint;
+  while (trimmed.endsWith('/')) {
+    trimmed = trimmed.slice(0, -1);
+  }
   const wsBase = trimmed.replace(/^http:\/\//i, 'ws://').replace(/^https:\/\//i, 'wss://');
   const baseUrl = `${wsBase}/api/v1/sessions/${encodeURIComponent(sessionId)}/ws`;
   if (presenterToken) {
@@ -634,11 +643,382 @@ export class QaSlideController {
   }
 }
 
+export interface PollSlideControllerOptions {
+  presenterToken?: string;
+  fetchFn?: typeof fetch;
+}
+
+export function injectPollStylesOnce(): void {
+  if (typeof document === 'undefined' || !document.head?.appendChild) return;
+  if (
+    typeof document.getElementById === 'function' &&
+    document.getElementById('agora-poll-styles')
+  ) {
+    return;
+  }
+  try {
+    const styleEl = document.createElement('style');
+    styleEl.setAttribute('id', 'agora-poll-styles');
+    styleEl.textContent = `
+      .poll-projector-view {
+        box-sizing: border-box;
+        width: 100%;
+        height: 100%;
+        max-height: 80vh;
+        overflow-y: auto;
+        padding: 2rem;
+        background: #0f172a;
+        color: #f8fafc;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        border-radius: 12px;
+        text-align: left;
+      }
+      .poll-header-container {
+        border-bottom: 2px solid #1e293b;
+        padding-bottom: 1rem;
+        margin-bottom: 1.5rem;
+      }
+      .poll-question-title {
+        font-size: 2.2rem;
+        color: #38bdf8;
+        margin: 0 0 0.5rem 0;
+      }
+      .poll-meta-row {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        font-size: 1.1rem;
+        color: #94a3b8;
+      }
+      .poll-status-tag {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-weight: 700;
+        text-transform: uppercase;
+        font-size: 0.85rem;
+        letter-spacing: 0.05em;
+      }
+      .poll-status-tag.open {
+        background: rgba(34, 197, 94, 0.2);
+        color: #4ade80;
+        border: 1px solid rgba(34, 197, 94, 0.4);
+      }
+      .poll-status-tag.closed {
+        background: rgba(239, 68, 68, 0.2);
+        color: #f87171;
+        border: 1px solid rgba(239, 68, 68, 0.4);
+      }
+      .poll-projector-options {
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .poll-projector-option-card {
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 1.25rem;
+      }
+      .poll-option-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 1.3rem;
+        font-weight: 600;
+        margin-bottom: 0.75rem;
+      }
+      .poll-option-counts {
+        color: #38bdf8;
+        font-weight: 700;
+      }
+      .poll-bar-track {
+        width: 100%;
+        height: 14px;
+        background: #0f172a;
+        border-radius: 9999px;
+        overflow: hidden;
+      }
+      .poll-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #0284c7, #38bdf8);
+        border-radius: 9999px;
+        transition: width 0.3s ease;
+      }
+      .poll-projector-footer {
+        margin-top: 2rem;
+        padding-top: 1rem;
+        border-top: 1px solid #1e293b;
+        display: flex;
+        justify-content: space-between;
+        color: #94a3b8;
+        font-size: 1.1rem;
+      }
+    `;
+    document.head.appendChild(styleEl);
+  } catch {
+    // Ignore in non-DOM environments
+  }
+}
+
+export class PollSlideController {
+  private polls: PollDefinition[] = [];
+  private pollResults = new Map<string, PollResultsSummary>();
+  private containerElement: HTMLElement | null = null;
+  private currentSlideId: string | null = null;
+
+  constructor(
+    private readonly sessionId: string,
+    private readonly endpoint: string,
+    private readonly options?: PollSlideControllerOptions,
+  ) {}
+
+  public setPoll(poll: PollDefinition): void {
+    const idx = this.polls.findIndex((p) => p.id === poll.id);
+    if (idx >= 0) {
+      this.polls[idx] = { ...poll };
+    } else {
+      this.polls.push({ ...poll });
+    }
+    this.render();
+  }
+
+  public setPollResults(summary: PollResultsSummary): void {
+    this.pollResults.set(summary.pollId, { ...summary });
+    const target = this.polls.find((p) => p.id === summary.pollId);
+    if (target) {
+      target.resultsRevealed = summary.resultsRevealed;
+    }
+    this.render();
+  }
+
+  public getPollForSlide(slideId: string): PollDefinition | null {
+    return this.polls.find((p) => p.slideId === slideId) ?? null;
+  }
+
+  public getPollResults(pollId: string): PollResultsSummary | null {
+    return this.pollResults.get(pollId) ?? null;
+  }
+
+  public mount(element: HTMLElement, slideId?: string): void {
+    this.containerElement = element;
+    if (slideId) {
+      this.currentSlideId = slideId;
+    } else if (element.getAttribute('data-slide-id')) {
+      this.currentSlideId = element.getAttribute('data-slide-id');
+    }
+    injectPollStylesOnce();
+    this.render();
+    void this.loadPolls();
+  }
+
+  public async loadPolls(): Promise<PollDefinition[]> {
+    const fetchImplementation =
+      this.options?.fetchFn ?? (typeof fetch !== 'undefined' ? fetch : null);
+    if (!fetchImplementation) return this.polls;
+    try {
+      let base = this.endpoint;
+      while (base.endsWith('/')) base = base.slice(0, -1);
+      const response = await fetchImplementation(
+        `${base}/api/v1/sessions/${encodeURIComponent(this.sessionId)}/polls`,
+        this.options?.presenterToken
+          ? { headers: { Authorization: `Bearer ${this.options.presenterToken}` } }
+          : undefined,
+      );
+      if (response.ok) {
+        const polls = (await response.json()) as PollDefinition[];
+        if (Array.isArray(polls)) {
+          this.polls = polls;
+          if (this.options?.presenterToken) {
+            try {
+              const stateResponse = await fetchImplementation(
+                `${base}/api/v1/sessions/${encodeURIComponent(this.sessionId)}`,
+                { headers: { Authorization: `Bearer ${this.options.presenterToken}` } },
+              );
+              if (stateResponse.ok) {
+                const state = (await stateResponse.json()) as {
+                  activePolls?: PollResultsSummary[];
+                };
+                if (Array.isArray(state.activePolls)) {
+                  for (const summary of state.activePolls) {
+                    this.pollResults.set(summary.pollId, { ...summary });
+                    const poll = this.polls.find((item) => item.id === summary.pollId);
+                    if (poll) poll.resultsRevealed = summary.resultsRevealed;
+                  }
+                }
+              }
+            } catch {
+              // Keep poll definitions if authoritative summaries are temporarily unavailable.
+            }
+          }
+          this.render();
+        }
+      }
+    } catch {
+      // Keep the last known poll state when offline.
+    }
+    return this.polls;
+  }
+
+  public handleRealtimeEvent(type: string, payload: unknown): void {
+    if (type === 'poll.opened') {
+      const p = payload as PollDefinition & { pollId?: string };
+      const id = p.id ?? p.pollId;
+      if (id) {
+        const existing = this.polls.find((item) => item.id === id);
+        if (existing) {
+          existing.status = 'open';
+          if (p.question) existing.question = p.question;
+          if (p.options) existing.options = p.options;
+        } else if (p.slideId && p.question && p.options) {
+          this.polls.push({
+            id,
+            sessionId: this.sessionId,
+            slideId: p.slideId,
+            question: p.question,
+            type: p.type || 'single',
+            options: p.options,
+            status: 'open',
+            resultsRevealed: Boolean(p.resultsRevealed),
+          });
+        }
+        this.render();
+      }
+    } else if (type === 'poll.closed') {
+      const p = payload as { pollId?: string; id?: string };
+      const id = p?.pollId ?? p?.id;
+      if (id) {
+        const target = this.polls.find((item) => item.id === id);
+        if (target) {
+          target.status = 'closed';
+          this.render();
+        }
+      }
+    } else if (type === 'poll.voted' || type === 'poll.results') {
+      const summary = this.pollResults.get((payload as { pollId?: string })?.pollId || '');
+      const poll = this.polls.find((item) => item.id === (payload as { pollId?: string })?.pollId);
+      const res = processPollRealtimeEvent(type, payload, poll, summary);
+      if (res) {
+        this.pollResults.set(res.pollId, res);
+        if (type === 'poll.results' && poll) {
+          poll.resultsRevealed = true;
+        }
+        this.render();
+      }
+    }
+  }
+
+  public render(): void {
+    if (!this.containerElement || typeof document === 'undefined') return;
+
+    const poll = this.currentSlideId
+      ? this.polls.find((p) => p.slideId === this.currentSlideId)
+      : this.polls[0];
+
+    if (!poll) {
+      return;
+    }
+
+    const summary = this.pollResults.get(poll.id);
+    const totalVotes = summary?.totalResponses ?? 0;
+    const isRevealed = Boolean(poll.resultsRevealed || summary?.resultsRevealed);
+
+    while (this.containerElement.firstChild) {
+      this.containerElement.removeChild(this.containerElement.firstChild);
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'poll-projector-view';
+
+    const header = document.createElement('div');
+    header.className = 'poll-header-container';
+
+    const title = document.createElement('h2');
+    title.className = 'poll-question-title';
+    title.textContent = poll.question;
+    header.appendChild(title);
+
+    const meta = document.createElement('div');
+    meta.className = 'poll-meta-row';
+
+    const statusBadge = document.createElement('span');
+    statusBadge.className = `poll-status-tag ${poll.status}`;
+    statusBadge.textContent = poll.status.toUpperCase();
+    meta.appendChild(statusBadge);
+
+    const typeBadge = document.createElement('span');
+    typeBadge.className = 'poll-type-tag';
+    typeBadge.textContent =
+      poll.type === 'binary'
+        ? 'Binary (Yes/No)'
+        : poll.type === 'multiple' || poll.type === 'multiple-choice'
+          ? 'Multiple Choice'
+          : 'Single Choice';
+    meta.appendChild(typeBadge);
+    header.appendChild(meta);
+    wrapper.appendChild(header);
+
+    const optionsList = document.createElement('ul');
+    optionsList.className = 'poll-projector-options';
+
+    for (const opt of poll.options) {
+      const item = document.createElement('li');
+      item.className = 'poll-projector-option-card';
+
+      const optHeader = document.createElement('div');
+      optHeader.className = 'poll-option-header';
+
+      const label = document.createElement('span');
+      label.textContent = opt.label || opt.text || opt.id;
+      optHeader.appendChild(label);
+
+      const count = summary?.countsByOptionId[opt.id] ?? 0;
+      const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
+
+      if (isRevealed) {
+        const stats = document.createElement('span');
+        stats.className = 'poll-option-counts';
+        stats.textContent = `${count} votes (${pct}%)`;
+        optHeader.appendChild(stats);
+      }
+      item.appendChild(optHeader);
+
+      if (isRevealed) {
+        const track = document.createElement('div');
+        track.className = 'poll-bar-track';
+        const fill = document.createElement('div');
+        fill.className = 'poll-bar-fill';
+        fill.style.width = `${pct}%`;
+        track.appendChild(fill);
+        item.appendChild(track);
+      }
+
+      optionsList.appendChild(item);
+    }
+    wrapper.appendChild(optionsList);
+
+    const footer = document.createElement('footer');
+    footer.className = 'poll-projector-footer';
+    const totalSpan = document.createElement('span');
+    totalSpan.textContent = isRevealed
+      ? `Total responses: ${totalVotes}`
+      : 'Voting in progress — results will be revealed by presenter';
+    footer.appendChild(totalSpan);
+    wrapper.appendChild(footer);
+
+    this.containerElement.appendChild(wrapper);
+  }
+}
+
 export class RevealAudiencePlugin implements RevealPlugin {
   public readonly id = 'audience';
   private deck: RevealDeck | null = null;
   private config: RevealAudienceConfig | null = null;
   private qaController: QaSlideController | null = null;
+  private pollController: PollSlideController | null = null;
   private currentMetadata: SlideMetadataExtract | null = null;
   private pendingSlideUpdate: { slideId: string; indexh: number; indexv: number } | null = null;
   private retryAttempt = 0;
@@ -675,6 +1055,10 @@ export class RevealAudiencePlugin implements RevealPlugin {
       presenterToken,
       fetchFn,
       slideTitles: this.collectSlideTitles(),
+    });
+    this.pollController = new PollSlideController(sessionId, endpoint, {
+      presenterToken,
+      fetchFn,
     });
 
     if (typeof window !== 'undefined') {
@@ -723,6 +1107,10 @@ export class RevealAudiencePlugin implements RevealPlugin {
 
   public getQaController(): QaSlideController | null {
     return this.qaController;
+  }
+
+  public getPollController(): PollSlideController | null {
+    return this.pollController;
   }
 
   public collectSlideTitles(): Record<string, string> {
@@ -814,6 +1202,7 @@ export class RevealAudiencePlugin implements RevealPlugin {
           clearTimeout(this.wsRetryTimeoutId);
           this.wsRetryTimeoutId = null;
         }
+        void this.pollController?.loadPolls();
         if (this.pendingSlideUpdate && this.config?.presenterToken) {
           this.sendWebSocketSlideChange(
             this.pendingSlideUpdate.slideId,
@@ -905,6 +1294,13 @@ export class RevealAudiencePlugin implements RevealPlugin {
         parsed.type === 'question.updated'
       ) {
         this.qaController?.handleRealtimeEvent(parsed.type, parsed.payload);
+      } else if (
+        parsed.type === 'poll.opened' ||
+        parsed.type === 'poll.closed' ||
+        parsed.type === 'poll.voted' ||
+        parsed.type === 'poll.results'
+      ) {
+        this.pollController?.handleRealtimeEvent(parsed.type, parsed.payload);
       }
     } catch {
       // Ignore malformed WebSocket frames
@@ -993,6 +1389,7 @@ export class RevealAudiencePlugin implements RevealPlugin {
 
   private handleSlideChange(event: RevealSlideChangedEvent): void {
     const { currentSlide, indexh, indexv } = event;
+    const currentSlideElement = currentSlide as HTMLElement;
     const metadata = extractSlideMetadata(currentSlide, indexh, indexv);
     this.currentMetadata = metadata;
 
@@ -1009,6 +1406,27 @@ export class RevealAudiencePlugin implements RevealPlugin {
         this.qaController.setSlideTitles(this.collectSlideTitles());
         this.qaController.mount(target);
         void this.qaController.loadQuestions();
+      }
+    }
+
+    const isPoll =
+      currentSlideElement?.dataset?.component === 'audience-poll' ||
+      Boolean(currentSlide?.querySelector?.('[data-component="audience-poll"]')) ||
+      Boolean(currentSlideElement?.dataset?.pollId) ||
+      Boolean(this.pollController?.getPollForSlide(metadata.id));
+
+    if (isPoll && this.pollController) {
+      let target: HTMLElement | null =
+        currentSlideElement.dataset.component === 'audience-poll'
+          ? currentSlideElement
+          : (currentSlide.querySelector('[data-component="audience-poll"]') as HTMLElement | null);
+      if (!target && typeof document !== 'undefined') {
+        target = document.createElement('div');
+        target.dataset.component = 'audience-poll';
+        currentSlideElement.appendChild(target);
+      }
+      if (target) {
+        this.pollController.mount(target, metadata.id);
       }
     }
 

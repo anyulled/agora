@@ -3,6 +3,9 @@ import {
   type AssetManifest,
   type AudienceQuestion,
   type NavigationSuggestion,
+  type PollDefinition,
+  type PollOption,
+  type PollResultsSummary,
   type Presentation,
   type PresentationSession,
   type QuestionStatus,
@@ -10,6 +13,9 @@ import {
   type ReactionCounts,
   type RealtimeEvent,
   type SlideMetadata,
+  escapeHtml,
+  processPollRealtimeEvent,
+  safeUrlAttribute,
 } from '@agora/contracts';
 
 export type QaViewMode = 'list' | 'detail';
@@ -44,6 +50,9 @@ export interface PresenterViewState {
   pdfDownloadUnlocked: boolean;
   activeSuggestion: NavigationSuggestion | null;
   qaState: QaSlideControllerState;
+  activePoll: PollDefinition | null;
+  activePollResults: PollResultsSummary | null;
+  pollsForCurrentSlide: PollDefinition[];
   hasAdminControls: false;
 }
 
@@ -53,6 +62,8 @@ export interface ProjectorViewState {
   currentSlide: SlideMetadata | null;
   isQaSlide: boolean;
   qaQuestions: AudienceQuestion[];
+  projectedPoll: PollDefinition | null;
+  projectedPollResults: PollResultsSummary | null;
   isSuggestionVisibleOnProjection: false;
   hasPresenterOnlyControls: false;
 }
@@ -74,6 +85,10 @@ export class PresenterAppController {
   private qaViewMode: QaViewMode = 'list';
   private selectedQuestionId: string | null = null;
   private qaSortBy: 'votes' | 'time' = 'votes';
+
+  // Contextual polls (SPEC-010)
+  private polls: PollDefinition[] = [];
+  private pollResults = new Map<string, PollResultsSummary>();
 
   private listeners = new Set<(state: PresenterViewState) => void>();
 
@@ -279,6 +294,7 @@ export class PresenterAppController {
   // Adaptive navigation (SPEC-011)
   setNavigationSuggestion(suggestion: NavigationSuggestion | null): void {
     this.activeSuggestion = suggestion ? { ...suggestion } : null;
+    this.notifyListeners();
   }
 
   getActiveSuggestion(): NavigationSuggestion | null {
@@ -290,11 +306,13 @@ export class PresenterAppController {
     const { targetHorizontalIndex, targetVerticalIndex } = this.activeSuggestion;
     const success = this.applySlideTransition(targetHorizontalIndex, targetVerticalIndex);
     this.activeSuggestion = null;
+    this.notifyListeners();
     return success;
   }
 
   dismissNavigationSuggestion(): void {
     this.activeSuggestion = null;
+    this.notifyListeners();
   }
 
   // Embedded Q&A Slide Controller (SPEC-008)
@@ -306,7 +324,9 @@ export class PresenterAppController {
   handleRealtimeEvent(event: RealtimeEvent): void {
     if (!event || event.sessionId !== this.session.id) return;
 
-    if (event.type === 'question.submitted') {
+    if (event.type === 'navigation.suggested') {
+      this.setNavigationSuggestion(event.payload as NavigationSuggestion);
+    } else if (event.type === 'question.submitted') {
       const q = event.payload as AudienceQuestion;
       if (q?.id) {
         this.questions = this.questions.filter((item) => item.id !== q.id).concat(q);
@@ -381,7 +401,176 @@ export class PresenterAppController {
           this.receiveReaction(p.slideId, p.reaction);
         }
       }
+    } else if (event.type === 'poll.opened') {
+      const p = event.payload as
+        | (PollDefinition & { pollId?: string })
+        | (PollResultsSummary & { options?: PollDefinition['options'] });
+      const candidateId = 'id' in p ? p.id : undefined;
+      const candidatePollId = 'pollId' in p ? p.pollId : undefined;
+      const id = candidateId ?? candidatePollId;
+      if (id) {
+        const existing = this.polls.find((item) => item.id === id);
+        if (existing) {
+          existing.status = 'open';
+          if ('options' in p && Array.isArray(p.options)) existing.options = p.options;
+          if ('question' in p && typeof p.question === 'string') existing.question = p.question;
+        } else if ('slideId' in p && 'question' in p && 'options' in p) {
+          const pollOptions = Array.isArray(p.options) ? (p.options as PollOption[]) : [];
+          this.polls.push({
+            id,
+            sessionId: this.session.id,
+            slideId: String(p.slideId),
+            question: String(p.question || ''),
+            type: p.type || 'single',
+            options: pollOptions,
+            status: 'open',
+            resultsRevealed: false,
+          });
+        }
+        this.notifyListeners();
+      }
+    } else if (event.type === 'poll.closed') {
+      const p = event.payload as { pollId?: string; id?: string };
+      const id = p?.pollId ?? p?.id;
+      if (id) {
+        const existing = this.polls.find((item) => item.id === id);
+        if (existing) {
+          existing.status = 'closed';
+          this.notifyListeners();
+        }
+      }
+    } else if (event.type === 'poll.voted' || event.type === 'poll.results') {
+      const summary = this.pollResults.get((event.payload as { pollId?: string })?.pollId || '');
+      const poll = this.polls.find(
+        (item) => item.id === (event.payload as { pollId?: string })?.pollId,
+      );
+      const res = processPollRealtimeEvent(event.type, event.payload, poll, summary);
+      if (res) {
+        this.pollResults.set(res.pollId, res);
+        if (event.type === 'poll.results' && poll) {
+          poll.resultsRevealed = true;
+        }
+        this.notifyListeners();
+      }
     }
+  }
+
+  // SPEC-010: Contextual polls management
+  setPolls(polls: PollDefinition[], results: PollResultsSummary[] = []): void {
+    this.polls = polls.map((p) => ({ ...p, options: p.options.map((o) => ({ ...o })) }));
+    for (const summary of results) {
+      this.pollResults.set(summary.pollId, {
+        ...summary,
+        countsByOptionId: { ...summary.countsByOptionId },
+      });
+    }
+    this.notifyListeners();
+  }
+
+  async loadPolls(
+    endpoint: string,
+    presenterToken: string,
+    fetchImplementation: typeof fetch = fetch,
+  ): Promise<boolean> {
+    let base = endpoint;
+    while (base.endsWith('/')) base = base.slice(0, -1);
+    try {
+      const response = await fetchImplementation(
+        `${base}/api/v1/sessions/${encodeURIComponent(this.session.id)}`,
+        { headers: { Authorization: `Bearer ${presenterToken}` } },
+      );
+      if (!response.ok) return false;
+      const state = (await response.json()) as { activePolls?: PollResultsSummary[] };
+      const results = Array.isArray(state.activePolls) ? state.activePolls : [];
+      const polls = results.flatMap((summary): PollDefinition[] => {
+        if (!summary.question || !summary.type || !summary.options) return [];
+        return [
+          {
+            id: summary.pollId,
+            sessionId: this.session.id,
+            slideId: summary.slideId,
+            question: summary.question,
+            type: summary.type,
+            options: summary.options,
+            status: summary.status,
+            resultsRevealed: summary.resultsRevealed,
+          },
+        ];
+      });
+      this.setPolls(polls, results);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  addPoll(poll: PollDefinition): void {
+    const existingIndex = this.polls.findIndex((p) => p.id === poll.id);
+    if (existingIndex >= 0) {
+      this.polls[existingIndex] = { ...poll, options: poll.options.map((o) => ({ ...o })) };
+    } else {
+      this.polls.push({ ...poll, options: poll.options.map((o) => ({ ...o })) });
+    }
+    this.notifyListeners();
+  }
+
+  getPolls(): PollDefinition[] {
+    return this.polls.map((p) => ({ ...p, options: p.options.map((o) => ({ ...o })) }));
+  }
+
+  getPollsForSlide(slideId: string): PollDefinition[] {
+    return this.polls.filter((p) => p.slideId === slideId);
+  }
+
+  getActivePollForSlide(slideId?: string): PollDefinition | null {
+    const targetSlideId = slideId ?? this.getCurrentSlide()?.id;
+    if (!targetSlideId) return null;
+    return (
+      this.polls.find((p) => p.slideId === targetSlideId && p.status === 'open') ??
+      this.polls.find((p) => p.slideId === targetSlideId) ??
+      null
+    );
+  }
+
+  getPollResults(pollId: string): PollResultsSummary | null {
+    return this.pollResults.get(pollId) ?? null;
+  }
+
+  openPoll(pollId: string): boolean {
+    const poll = this.polls.find((p) => p.id === pollId);
+    if (!poll) return false;
+    poll.status = 'open';
+    this.notifyListeners();
+    return true;
+  }
+
+  closePoll(pollId: string): boolean {
+    const poll = this.polls.find((p) => p.id === pollId);
+    if (!poll) return false;
+    poll.status = 'closed';
+    this.notifyListeners();
+    return true;
+  }
+
+  revealPollResults(pollId: string): boolean {
+    const poll = this.polls.find((p) => p.id === pollId);
+    if (!poll) return false;
+    const summary = this.pollResults.get(pollId) ?? {
+      pollId: poll.id,
+      slideId: poll.slideId,
+      question: poll.question,
+      type: poll.type,
+      options: poll.options.map((option) => ({ ...option })),
+      status: poll.status,
+      resultsRevealed: false,
+      totalResponses: 0,
+      countsByOptionId: Object.fromEntries(poll.options.map((option) => [option.id, 0])),
+    };
+    this.pollResults.set(pollId, summary);
+    poll.resultsRevealed = true;
+    summary.resultsRevealed = true;
+    this.notifyListeners();
+    return true;
   }
 
   selectQuestion(questionId: string): boolean {
@@ -426,7 +615,10 @@ export class PresenterAppController {
       return q;
     }
 
-    const cleanEndpoint = endpoint.replace(/\/+$/, '');
+    let cleanEndpoint = endpoint;
+    while (cleanEndpoint.endsWith('/')) {
+      cleanEndpoint = cleanEndpoint.slice(0, -1);
+    }
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
@@ -502,6 +694,11 @@ export class PresenterAppController {
 
   getViewState(): PresenterViewState {
     const currentSlide = this.getCurrentSlide();
+    const slideId = currentSlide?.id ?? '';
+    const pollsForCurrentSlide = this.getPollsForSlide(slideId);
+    const activePoll = this.getActivePollForSlide(slideId) ?? pollsForCurrentSlide[0] ?? null;
+    const activePollResults = activePoll ? (this.pollResults.get(activePoll.id) ?? null) : null;
+
     return {
       sessionId: this.session.id,
       presentationId: this.presentation.id,
@@ -522,18 +719,30 @@ export class PresenterAppController {
       pdfDownloadUnlocked: this.session.pdfDownloadUnlocked,
       activeSuggestion: this.getActiveSuggestion(),
       qaState: this.getQaState(),
+      activePoll,
+      activePollResults,
+      pollsForCurrentSlide,
       hasAdminControls: false, // SPEC-012: Invariant
     };
   }
 
   getProjectorViewState(): ProjectorViewState {
     const currentSlide = this.getCurrentSlide();
+    const slideId = currentSlide?.id ?? '';
+    const pollsForCurrentSlide = this.getPollsForSlide(slideId);
+    const revealedPoll = pollsForCurrentSlide.find((p) => p.resultsRevealed) ?? null;
+    const projectedPollResults = revealedPoll
+      ? (this.pollResults.get(revealedPoll.id) ?? null)
+      : null;
+
     return {
       sessionId: this.session.id,
       presentationTitle: this.presentation.title,
       currentSlide,
       isQaSlide: Boolean(currentSlide?.isQaSlide),
       qaQuestions: this.getQuestions(),
+      projectedPoll: revealedPoll,
+      projectedPollResults,
       isSuggestionVisibleOnProjection: false, // SPEC-012: Invariant
       hasPresenterOnlyControls: false, // SPEC-012: Invariant
     };
@@ -548,7 +757,7 @@ export function renderPresenterViewHtml(state: PresenterViewState): string {
     suggestionBanner = `
       <aside class="suggestion-banner" role="alert" aria-live="assertive">
         <div class="suggestion-content">
-          <strong>Suggested Navigation:</strong> ${state.activeSuggestion.reason}
+          <strong>Suggested Navigation:</strong> ${escapeHtml(state.activeSuggestion.reason)}
           <span>(Target coordinates: ${state.activeSuggestion.targetHorizontalIndex}, ${state.activeSuggestion.targetVerticalIndex})</span>
         </div>
         <div class="suggestion-actions">
@@ -565,7 +774,7 @@ export function renderPresenterViewHtml(state: PresenterViewState): string {
       const q = state.qaState.selectedQuestion;
       const slideImageBlock = state.qaState.hasReferencedSlidePng
         ? `<div class="referenced-slide-preview">
-             <img src="${state.qaState.referencedSlidePngUrl}" alt="Referenced Slide ${q.slideId}" class="slide-static-img" />
+             <img src="${safeUrlAttribute(state.qaState.referencedSlidePngUrl)}" alt="Referenced Slide ${escapeHtml(q.slideId)}" class="slide-static-img" />
            </div>`
         : `<div class="referenced-slide-fallback">
              <p>Static slide preview image unavailable for this slide.</p>
@@ -576,13 +785,13 @@ export function renderPresenterViewHtml(state: PresenterViewState): string {
           <div class="qa-detail-header">
             <button class="btn-back" data-action="qa-back">&larr; Back to List (Esc)</button>
             <div class="qa-status-controls">
-              <button class="btn-status" data-action="qa-mark-answered" data-id="${q.id}">Mark Answered</button>
-              <button class="btn-status" data-action="qa-mark-dismissed" data-id="${q.id}">Dismiss</button>
+              <button class="btn-status" data-action="qa-mark-answered" data-id="${escapeHtml(q.id)}">Mark Answered</button>
+              <button class="btn-status" data-action="qa-mark-dismissed" data-id="${escapeHtml(q.id)}">Dismiss</button>
             </div>
           </div>
           <article class="question-featured">
-            <h3>"${q.content}"</h3>
-            <p class="question-meta">Submitted by ${q.participantName ?? 'Anonymous'} &bull; ${q.upvotes} upvotes</p>
+            <h3>"${escapeHtml(q.content)}"</h3>
+            <p class="question-meta">Submitted by ${escapeHtml(q.participantName ?? 'Anonymous')} &bull; ${q.upvotes} upvotes</p>
           </article>
           ${slideImageBlock}
         </div>`;
@@ -595,11 +804,46 @@ export function renderPresenterViewHtml(state: PresenterViewState): string {
     }
   }
 
+  // Contextual Polls widget (SPEC-010)
+  let pollControlHtml = '';
+  if (state.activePoll) {
+    const p = state.activePoll;
+    const summary = state.activePollResults;
+    const totalVotes = summary?.totalResponses ?? 0;
+    const optionsHtml = p.options
+      .map((opt) => {
+        const count = summary?.countsByOptionId[opt.id] ?? 0;
+        const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
+        return `
+          <li class="presenter-poll-option">
+            <span>${escapeHtml(opt.label || opt.text || opt.id)}</span>
+            <span class="poll-opt-votes">${count} votes (${pct}%)</span>
+          </li>`;
+      })
+      .join('');
+
+    pollControlHtml = `
+      <section class="card poll-control-panel" aria-label="Slide Poll Controls">
+        <header class="poll-header">
+          <h4>Poll: ${escapeHtml(p.question)}</h4>
+          <span class="poll-badge status-${p.status}">${p.status.toUpperCase()}</span>
+        </header>
+        <ul class="presenter-poll-options">
+          ${optionsHtml}
+        </ul>
+        <div class="poll-actions">
+          ${p.status !== 'open' ? `<button class="btn-poll-open" data-action="open-poll" data-id="${escapeHtml(p.id)}">Open Poll</button>` : ''}
+          ${p.status === 'open' ? `<button class="btn-poll-close" data-action="close-poll" data-id="${escapeHtml(p.id)}">Close Poll</button>` : ''}
+          ${!p.resultsRevealed ? `<button class="btn-poll-reveal" data-action="reveal-poll" data-id="${escapeHtml(p.id)}">Reveal on Projector</button>` : '<span class="revealed-badge">Revealed on Projector</span>'}
+        </div>
+      </section>`;
+  }
+
   const sessionJoinBanner =
     state.audienceUrl || state.qrCodeDataUrl
       ? `<div class="session-join-banner">
-          ${state.audienceUrl ? `<p class="presenter-join-url">Join: <a href="${state.audienceUrl}">${state.audienceUrl}</a></p>` : ''}
-          ${state.qrCodeDataUrl ? `<img src="${state.qrCodeDataUrl}" alt="Audience join QR code" class="presenter-qr-code" />` : ''}
+          ${state.audienceUrl ? `<p class="presenter-join-url">Join: <a href="${safeUrlAttribute(state.audienceUrl)}">${escapeHtml(state.audienceUrl)}</a></p>` : ''}
+          ${state.qrCodeDataUrl ? `<img src="${safeUrlAttribute(state.qrCodeDataUrl, true)}" alt="Audience join QR code" class="presenter-qr-code" />` : ''}
         </div>`
       : '';
 
@@ -608,9 +852,10 @@ export function renderPresenterViewHtml(state: PresenterViewState): string {
       ${suggestionBanner}
       <div class="console-body">
         <section class="slide-viewport" aria-label="Active Slide Viewport">
-          <h2 class="slide-title-display">${state.currentSlide?.title ?? 'No slide'}</h2>
+          <h2 class="slide-title-display">${escapeHtml(state.currentSlide?.title ?? 'No slide')}</h2>
           <span class="coordinates-indicator">Coordinates: [${state.horizontalIndex}, ${state.verticalIndex}]</span>
           ${qaViewHtml}
+          ${pollControlHtml}
         </section>
         <aside class="presenter-sidebar">
           ${sessionJoinBanner}
@@ -671,10 +916,39 @@ export function renderProjectorViewHtml(state: ProjectorViewState): string {
           ${listHtml || '<li>No questions submitted yet.</li>'}
         </ul>
       </div>`;
+  } else if (state.projectedPollResults) {
+    const res = state.projectedPollResults;
+    const total = Math.max(1, res.totalResponses);
+    const optionsHtml = Object.entries(res.countsByOptionId)
+      .map(([optId, count]) => {
+        const pct = res.totalResponses > 0 ? Math.round((count / total) * 100) : 0;
+        return `
+        <li class="projector-poll-option">
+          <div class="poll-opt-header">
+            <span class="poll-opt-label">${escapeHtml(res.options?.find((option) => option.id === optId)?.label ?? res.options?.find((option) => option.id === optId)?.text ?? optId)}</span>
+            <span class="poll-opt-stat">${count} votes (${pct}%)</span>
+          </div>
+          <div class="poll-progress-track">
+            <div class="poll-progress-fill" style="width: ${pct}%"></div>
+          </div>
+        </li>`;
+      })
+      .join('');
+
+    content = `
+      <div class="projector-poll-slide" data-component="audience-poll">
+        <h2>${escapeHtml(state.projectedPoll?.question ?? 'Live Poll Results')}</h2>
+        <ul class="projector-poll-options">
+          ${optionsHtml}
+        </ul>
+        <footer class="projector-poll-footer">
+          <span>Total Responses: ${res.totalResponses}</span>
+        </footer>
+      </div>`;
   } else {
     content = `
       <div class="projector-slide-content">
-        <h1>${state.currentSlide?.title ?? state.presentationTitle}</h1>
+        <h1>${escapeHtml(state.currentSlide?.title ?? state.presentationTitle)}</h1>
       </div>`;
   }
 

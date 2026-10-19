@@ -248,6 +248,7 @@ describe('Security & Abuse Prevention Integration Tests (SPEC-018)', () => {
           slideId: 'slide-1',
           question: 'Choice',
           type: 'single',
+          status: 'open',
           options: [
             { id: 'opt-a', label: 'Option A' },
             { id: 'opt-b', label: 'Option B' },

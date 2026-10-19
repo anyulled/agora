@@ -1,18 +1,63 @@
 # Agora Engineering Progress Log
 
+## Session 036 local duplication threshold alignment — 2026-10-19
+- Aligned jscpd's total duplication threshold with SonarCloud's 3% quality gate while retaining the separate 10% per-file guard; documented that local source coverage and Sonar new-code scope differ.
+- Updated detector regression coverage for exactly 3.0% passing, 3.1% total failing, and a file exceeding 10% failing independently.
+- `pnpm exec vitest run tests/integration/commitlint.test.ts` passed (8 tests); `pnpm run lint:dup` passed at 1.8% total with the 3% limit; `pnpm run verify` and `./init.sh` passed with all 15 test files and 212 tests.
+
+## Session 035 PR unblock follow-up — 2026-10-19
+- Addressed current PR #48 review findings: reject non-finite adaptive-navigation percentages, keep rule coordinates synchronized after slide edits, restrict unrevealed `poll.opened` events to presenter sockets, document the poll-list GET operation, expose the presenter token once for copying, open secondary views in safe new tabs, tolerate unavailable sessionStorage after votes, bound local request buffering, and terminate local WebSocket clients during shutdown.
+- Confirmed the Reveal plugin already fetches the poll list without a presenter token and adds Authorization only when available.
+- Added admin regression coverage for non-finite thresholds and destination coordinate updates. Focused existing tests passed before extending integration setup; an incomplete test fixture was removed.
+- `pnpm run verify` passed: format, lint, typecheck, all package builds, 15/15 test files and 212/212 tests, and all victory layers. `./init.sh` also passed with 212/212 tests.
+- PR #51 merged into main with 11/11 checks passing.
+
+## Session 034 local browser token smoke — 2026-10-19
+- Started a local presentation and live session in the browser. Verified localStorage contains only the session title and sessionStorage contains no token. Shut down the app and removed its generated .agora-local data.
+- Full pnpm run verify passed with 211 tests. GitHub CodeQL and CodeRabbit results await the pushed head.
+
+## Session 033 PR #48 CodeQL follow-up — 2026-10-19
+- Removed admin, presenter, and participant token persistence from browser storage. Tokens now stay in page memory; README explains re-entry after reload. Legacy presenter tokens are stripped from saved session metadata.
+- Full pnpm run verify passed: format, lint, typecheck, all workspace builds, 15 test files and 211 tests, and victory detector. Local checks pass; new GitHub CodeQL and CodeRabbit results await push.
+
+## Session 032 PR #48 CodeRabbit feedback — 2026-10-19
+- Restricted adaptive-navigation suggestions to presenter-authenticated WebSocket connections; added regression coverage confirming audience sockets receive no suggestion event.
+- Filtered active poll summaries by revealed slide for non-presenters while retaining all session polls for presenters. Added Durable Object poll and vote table initialization before writes and hydration, with a restart integration test that drops the tables first.
+- Escaped presenter suggestion reason text and regenerated docs/openapi.json from AGORA_OPENAPI_SPEC.
+- pnpm run verify passed: format, lint, typecheck, all workspace builds, 15 test files and 210 tests, and all victory layers. Final ./init.sh passed with 210 tests.
+- CodeQL reports two local admin-token storage alerts on the shared poll head; removing browser storage of admin, presenter, and participant tokens is the remaining security fix.
+
+## Session 031 PR #49 base merge — 2026-10-19
+- Merged PR #48 base commit `2357b90` into the contextual-polls branch, preserving both the poll-console progress and issue #19 adaptive-navigation progress.
+- Resolved the shared progress and handoff document conflicts. `./init.sh` passed 209/209 tests; `pnpm run verify` passed format, lint, typecheck, build, 209 tests, and victory detection.
+
 ## Session 030 PR #51 SonarCloud duplication — 2026-10-19
 - Simplified presenter/projector route integration-test setup by seeding the in-memory app store directly; removed repeated create-presentation, create-session, join, question, and reaction request scaffolding while retaining route/auth/privacy assertions.
 - Targeted presenter fragment integration test passed. `pnpm run verify` passed all checks with 194 tests; `./init.sh` also passed with 194 tests.
-- SonarCloud new-code duplicate lines previously came entirely from repeated setup in `tests/integration/worker-api.test.ts` (29 duplicated lines); fresh hosted analysis is pending push.
 
-## Session 029 — 2026-10-19
+## Session 030 PR security and quality findings — 2026-10-19
+- Hardened the local API boundary by rejecting malformed/absolute request targets and enforcing the configured local browser Origin before WebSocket upgrades. The Worker now receives the same strict local Origin allowlist.
+- Refactored the poll list renderer into focused card, vote, and presenter-control helpers to reduce cognitive complexity. Simplified URL construction and local startup port propagation.
+- Verified hostile WebSocket Origin rejection manually (`403 Forbidden`) and exercised the local API runtime.
+- `./init.sh` passed: 15/15 files, 206/206 tests. `pnpm run verify` passed formatting, lint, typecheck, all workspace builds, tests, and the three-layer victory detector.
 
-- Implemented GitHub issue #20 (SPEC-012) in isolated worktree `../agora-issue-20` from `origin/main`.
+## Session 029 presenter view (SPEC-012) — 2026-10-19
+- Implemented GitHub issue #20 (SPEC-012) in isolated worktree `../agora-issue-20`.
 - Added Worker-served presenter and projector session pages at `/presenter/:sessionId` and `/projector/:sessionId`.
 - Wired authenticated presenter navigation through the existing session APIs, including keyboard arrow handling, directional controls, session completion, and live refresh over WebSocket/polling.
 - Reused presenter controller state to render current-slide viewport, reaction tallies, question count, and connected attendee count while keeping projector output free of private controls.
 - Added integration coverage proving presenter auth is required and projector fragments do not expose presenter metrics or navigation controls.
-- `./init.sh` passed and `pnpm run verify` passed: 15 test files, 194 tests, full harness validation, workspace build, and all three victory layers.
+
+## Session 029 adaptive navigation (SPEC-011) — 2026-10-19
+- Implemented GitHub issue #19 (`SPEC-011: Adaptive navigation`) in the isolated `feat/issue-19-adaptive-navigation` worktree.
+- Added authenticated presentation settings endpoints to list, create, and delete adaptive navigation rules.
+- Moved rule evaluation to poll closure. Matching outcomes broadcast `navigation.suggested`, while individual votes never navigate or prompt automatically.
+- Connected the presenter real-time event handler to render the existing prominent accept/dismiss banner.
+
+## Session 028 completion — 2026-10-19
+- Completed GitHub issue #18 (SPEC-010) in the isolated `issue-18-polls` worktree. Poll creation, presenter controls, audience voting, revealed projector results, and persistent local emulation are implemented.
+- Browser smoke verified closed poll creation, opening, voting, presenter counts, closing, reveal, and audience/projector results. Restart smoke verified session, poll, and vote persistence in `.agora-local`.
+- `pnpm exec vitest run tests/integration/worker-api.test.ts`: 14/14 passed. `./init.sh`: 15/15 files and 204/204 tests passed.
 
 > Progress log adhering to Harness Engineering Practice 5.
 > Tracks session continuity, verified states, and cumulative system achievements.
@@ -564,3 +609,61 @@
   - `pnpm run typecheck && pnpm run lint`: 0 errors, 0 warnings.
   - `./init.sh`: 15/15 test suites (193 tests) passing.
   - `pnpm run harness:victory`: 🏆 VICTORY DETECTED (All 3 termination layers verified successfully).
+
+---
+
+## Session 025 — 2026-10-19
+- **Role**: Creative Visuals & Documentation Engineer
+- **Goals**:
+  1. Create a watercolor illustration of an ancient Greek agora with semi-circular structures, audience, speaker, "Agora" heading, and app purpose subheading.
+  2. Embed banner into `README.md` and store asset in `docs/assets/agora-banner.jpg`.
+  3. Wire poll types and DO persistence in `apps/worker` and `@agora/contracts`.
+  4. Verify `./init.sh` and Three-Layer Victory Detector (`pnpm run harness:victory`).
+- **Completed**:
+  - Generated 16:9 watercolor header banner illustrating an ancient Greek agora with semi-circular amphitheater, citizen assembly, central orator, stoa colonnades, and typography ("Agora" & "Interactive Real-Time Conference Presentation Platform").
+  - Placed image in `docs/assets/agora-banner.jpg` and embedded at the top of `README.md`.
+  - Wired `persistPollToDO` and `persistPollVoteToDO` in `apps/worker/src/index.ts` with clean `@agora/contracts` imports.
+  - Executed `./init.sh`: all 15 test suites (193 tests) passed cleanly with 0 lint, format, or typecheck errors.
+  - Executed `pnpm run harness:victory`: 🏆 VICTORY DETECTED.
+- **Verification Evidence**:
+  - `docs/assets/agora-banner.jpg`: Verified image asset created and referenced in `README.md`.
+  - `./init.sh`: 15/15 test suites (193 tests) passing.
+  - `pnpm run harness:victory`: All 3 layers verified passing.
+
+---
+
+## Session 026 — 2026-10-19
+- **Role**: Code Scanning & Security Remediation Engineer
+- **Goals**:
+  1. Inspect and resolve all 54 GitHub Code Scanning findings (CodeQL & SonarCloud alerts):
+     - `js/polynomial-redos` (7 alerts): Rewrite URL trimming regexes and revision pattern to eliminate polynomial backtracking.
+     - `js/incomplete-multi-character-sanitization` & `js/bad-tag-filter` (8 alerts): Implement robust iterative sanitization for HTML/script tags and strip dangerous URI schemes (`javascript:`, `vbscript:`, `data:`).
+     - `js/incomplete-url-scheme-check` (1 alert): Include `data:` and `vbscript:` in URL scheme validation alongside `javascript:`.
+     - `js/clear-text-logging` (1 alert): Remove sensitive `accountId` parameter from log messages in `infrastructure/cloudflare/provision.mjs`.
+     - SonarCloud alerts (`typescript:S2245`, `jssecurity:S5145`, `javascript:S4036`, `githubactions:S7637`, `githubactions:S7636`, `typescript:S4790`): Verify all previous code-level remediations are in place and clean.
+  2. Maintain 100% test pass rate and Clean Architecture pure domain boundaries.
+  3. Verify `./init.sh` and Three-Layer Victory Detector (`pnpm run harness:victory`).
+- **Completed**:
+  - Updated `sanitizeText` in `apps/worker/src/index.ts` to remove control characters while preserving raw stored text; HTML is escaped at renderer boundaries and URL schemes are checked only for URL attributes.
+  - Routed domain question cleanup through a bounded shared scanner that removes HTML tags and script/style contents, handles encoded angle brackets, preserves ordinary text such as `metadata:`, and removes nested `javascript:`/`vbscript:` prefixes.
+  - Reused the shared HTML text sanitizer for participant display names, eliminating a backtracking tag-stripping expression.
+  - Eliminated polynomial ReDoS regexes across `packages/domain/src/index.ts`, `apps/audience/src/index.ts`, `apps/presenter/src/index.ts`, and `packages/reveal-plugin/src/index.ts` by replacing `replace(/\/+$/, '')` with `while (str.endsWith('/')) str = str.slice(0, -1)`.
+  - Replaced ambiguous revision matching `/^(.*?)(\d+)$/` in `bumpRevision` with bounded non-backtracking `/^(.*?)(\d{1,9})$/`.
+  - Replaced dynamic Cloudflare account onboarding URL logging in `infrastructure/cloudflare/provision.mjs` with generic link without expanding `accountId`.
+  - Verified and fixed all poll type tests in `packages/domain/src/__tests__/domain.test.ts`.
+  - Fixed the PR review issues around poll state hydration, audience result privacy, duplicate choices, vote persistence, escaped poll text, OpenAPI schemas, poll loading after reconnect, and preserving authored slide content.
+- **Verification Evidence**:
+  - `./init.sh`: 15/15 test files and 203 tests passed; harness, architecture, duplication, Mermaid, OpenAPI, lint, typecheck, and Cloudflare emulation checks passed.
+  - `pnpm run verify`: workspace build and all three victory layers passed; 15/15 test files and 203 tests passed.
+  - `pnpm run typecheck && pnpm run lint`: 0 errors, 0 warnings.
+
+
+
+### PR #48 unblock follow-up — 2026-10-19
+- Corrected the prior Session 026 sanitization and verification notes to match the implementation and rerun results.
+- Confirmed the public session endpoint hides unrevealed vote totals while presenter-authenticated state returns authoritative poll summaries.
+- Added duplicate selection rejection at both Worker and domain boundaries, JSON poll vote persistence for IDs containing commas, and poll recovery on mount and WebSocket reconnect.
+- Escaped audience/projector poll text, hid vote counts until reveal, preserved poll state on reopen, and mounted poll rendering into a dedicated slide child.
+- Updated poll vote/OpenAPI schemas, the Cloudflare Workers & Pages onboarding link, and the generated OpenAPI document.
+- Verification: `./init.sh` and `pnpm run verify` passed; 15/15 test files and 203 tests passed, with all workspace builds and victory layers passing.
+- Remote PR checks have not rerun because these changes are local and not yet pushed.

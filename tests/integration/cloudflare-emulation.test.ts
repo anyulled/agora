@@ -667,4 +667,124 @@ describe('Cloudflare Local Emulation Integration Tests', () => {
 
     env.close();
   });
+
+  it('creates and hydrates poll tables when Durable Object storage starts without poll schema', async () => {
+    const env = createLocalCloudflareEnv({ persistDir: tmpDir, adminToken: 'poll-admin-secret' });
+    try {
+      const app = createAgoraWorkerApp({ adminToken: env.ADMIN_TOKEN });
+      const adminHeaders = {
+        Authorization: `Bearer ${env.ADMIN_TOKEN}`,
+        'Content-Type': 'application/json',
+      };
+      const presentationResponse = await app.fetch(
+        new Request('http://localhost/api/v1/presentations', {
+          method: 'POST',
+          headers: adminHeaders,
+          body: JSON.stringify({
+            title: 'Poll schema migration',
+            slides: [
+              {
+                id: 'poll-slide',
+                presentationId: 'poll-presentation',
+                title: 'Poll slide',
+                horizontalIndex: 0,
+                verticalIndex: 0,
+                order: 0,
+              },
+            ],
+          }),
+        }),
+        env,
+      );
+      const presentation = (await presentationResponse.json()) as { id: string };
+      const sessionResponse = await app.fetch(
+        new Request(`http://localhost/api/v1/presentations/${presentation.id}/sessions`, {
+          method: 'POST',
+          headers: adminHeaders,
+        }),
+        env,
+      );
+      const session = (await sessionResponse.json()) as { id: string; presenterToken: string };
+      const doState = env.SESSION_COORDINATOR.getState(
+        env.SESSION_COORDINATOR.idFromName(session.id),
+      );
+      doState.storage.sql.exec('DROP TABLE poll_votes');
+      doState.storage.sql.exec('DROP TABLE polls');
+
+      const createPollResponse = await app.fetch(
+        new Request(`http://localhost/api/v1/sessions/${session.id}/polls`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${session.presenterToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            slideId: 'poll-slide',
+            question: 'Does schema initialization work?',
+            options: [
+              { id: 'yes', label: 'Yes' },
+              { id: 'no', label: 'No' },
+            ],
+          }),
+        }),
+        env,
+      );
+      expect(createPollResponse.status).toBe(201);
+      const poll = (await createPollResponse.json()) as { id: string };
+      const startResponse = await app.fetch(
+        new Request(`http://localhost/api/v1/sessions/${session.id}/start`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${session.presenterToken}` },
+        }),
+        env,
+      );
+      expect(startResponse.status).toBe(200);
+      const openPollResponse = await app.fetch(
+        new Request(`http://localhost/api/v1/sessions/${session.id}/polls/${poll.id}/open`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${session.presenterToken}` },
+        }),
+        env,
+      );
+      expect(openPollResponse.status).toBe(200);
+      const participantResponse = await app.fetch(
+        new Request(`http://localhost/api/v1/sessions/${session.id}/join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ displayName: 'Tester' }),
+        }),
+        env,
+      );
+      const participant = (await participantResponse.json()) as { token: string };
+      const voteResponse = await app.fetch(
+        new Request(`http://localhost/api/v1/sessions/${session.id}/polls/${poll.id}/vote`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${participant.token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ optionId: 'yes' }),
+        }),
+        env,
+      );
+      expect(voteResponse.status).toBe(200);
+
+      const restartedApp = createAgoraWorkerApp({ adminToken: env.ADMIN_TOKEN });
+      const hydratedResponse = await restartedApp.fetch(
+        new Request(`http://localhost/api/v1/sessions/${session.id}`, {
+          headers: { Authorization: `Bearer ${session.presenterToken}` },
+        }),
+        env,
+      );
+      const hydratedSession = (await hydratedResponse.json()) as {
+        activePolls: Array<{ pollId: string; totalResponses: number }>;
+      };
+      expect(hydratedSession.activePolls.some((item) => item.pollId === poll.id)).toBe(true);
+      expect(
+        hydratedSession.activePolls.find((item) => item.pollId === poll.id)?.totalResponses,
+      ).toBe(1);
+    } finally {
+      env.close();
+    }
+  });
 });

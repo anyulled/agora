@@ -1,6 +1,6 @@
 {
   "project": "agora",
-  "last_updated": "2026-10-18",
+  "last_updated": "2026-10-19T14:49:49.118Z",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
@@ -40,6 +40,12 @@
           "timestamp": "2026-10-19T00:06:34Z",
           "result": "passed",
           "assertions": 18
+        },
+        {
+          "type": "local_smoke",
+          "target": "pnpm dev: create presentation and list it after restart",
+          "timestamp": "2026-10-19T12:49:00Z",
+          "result": "passed"
         }
       ],
       "notes": "Includes D1 SQLite persistence, slide_metadata view, deterministic SHA-256 revision hashing, PUT/PATCH CRUD, and R2/D1 stale asset invalidation."
@@ -72,6 +78,12 @@
           "timestamp": "2026-10-19T00:40:00Z",
           "result": "passed",
           "assertions": 35
+        },
+        {
+          "type": "local_smoke",
+          "target": "pnpm dev: create session, navigate slide, join audience",
+          "timestamp": "2026-10-19T12:49:00Z",
+          "result": "passed"
         }
       ],
       "notes": "Includes scheduled -> live -> completed lifecycle, Durable Object SQLite persistence (session_state, participants, _do_kv), WebSocket reconnect state restoration, Admin/Presenter QR code & join URL rendering, and OpenAPI 3.1.0 endpoint documentation."
@@ -367,8 +379,12 @@
       "user_visible_behavior": "Supports single-choice, multiple-choice, and binary polls anchored to slides. Presenter opens/closes polls and reveals live aggregated results on the projected deck. Responses persist in SQLite with one response per participant rule.",
       "status": "passing",
       "verification": [
-        "vitest run packages/domain/tests/polls.test.ts",
-        "vitest run apps/worker/tests/polls.test.ts"
+        "pnpm exec vitest run tests/integration/worker-api.test.ts",
+        "./init.sh",
+        "pnpm run format:check",
+        "pnpm run lint",
+        "pnpm run typecheck",
+        "pnpm run harness:victory"
       ],
       "evidence": [
         {
@@ -377,9 +393,92 @@
           "timestamp": "2026-10-18T20:44:50Z",
           "result": "passed",
           "assertions": 10
+        },
+        {
+          "type": "test_suite",
+          "target": "pnpm run verify",
+          "timestamp": "2026-10-19T12:59:28Z",
+          "result": "passed",
+          "assertions": 203
+        },
+        {
+          "type": "verification",
+          "target": "PR #48 poll lifecycle consolidation",
+          "timestamp": "2026-10-19T15:20:00Z",
+          "result": "passed",
+          "assertions": 203
+        },
+        {
+          "type": "verification",
+          "target": "pnpm run verify (six stages: format:check, lint, typecheck, build, test, victory detector)",
+          "timestamp": "2026-10-19T13:37:02.981Z",
+          "result": "passed",
+          "assertions": 205,
+          "stageResults": [
+            {
+              "command": "pnpm run format:check",
+              "exitStatus": 0
+            },
+            {
+              "command": "pnpm run lint",
+              "exitStatus": 0
+            },
+            {
+              "command": "pnpm run typecheck",
+              "exitStatus": 0
+            },
+            {
+              "command": "pnpm run build",
+              "exitStatus": 0
+            },
+            {
+              "command": "pnpm run test",
+              "exitStatus": 0,
+              "tests": 205
+            },
+            {
+              "command": "node harness/victory-detector.mjs",
+              "exitStatus": 0
+            }
+          ]
+        },
+        {
+          "type": "test_suite",
+          "target": "./init.sh",
+          "timestamp": "2026-10-19T13:25:56Z",
+          "result": "passed",
+          "assertions": 204
+        },
+        {
+          "type": "verification",
+          "target": "./init.sh and pnpm run verify after local API and Sonar fixes",
+          "timestamp": "2026-10-19T14:13:55Z",
+          "result": "passed",
+          "assertions": 206
+        },
+        {
+          "type": "verification",
+          "target": "pnpm run verify after CodeRabbit PR #48 feedback",
+          "timestamp": "2026-10-19T14:40:09.358Z",
+          "result": "passed",
+          "assertions": 210
+        },
+        {
+          "type": "verification",
+          "target": "pnpm run verify after PR #48 review and CodeQL fixes",
+          "timestamp": "2026-10-19T14:45:52.854Z",
+          "result": "passed",
+          "assertions": 211
+        },
+        {
+          "type": "verification",
+          "target": "local browser smoke confirmed admin and presenter tokens are not stored",
+          "timestamp": "2026-10-19T14:49:49.118Z",
+          "result": "passed",
+          "assertions": 1
         }
       ],
-      "notes": "Enforces strict participant voting constraints server-side."
+      "notes": "Presenter can create closed slide-scoped single-choice, multiple-choice, and binary polls, open/close voting, and reveal aggregate results. Audience can vote once per poll; projector receives revealed results. Local API persists D1 and Durable Object SQLite state in .agora-local across restarts. Poll creation validates slide, type, options, and labels."
     },
     {
       "id": "SPEC-011",
@@ -388,7 +487,10 @@
       "title": "Adaptive navigation",
       "user_visible_behavior": "Allows defining branch rules based on slide IDs, poll outcomes, or vote thresholds. Matching rules emit suggestions to presenter, who must explicitly confirm before the deck branches. Visiting destination reveals that slide while keeping skipped branches unrevealed.",
       "status": "passing",
-      "verification": ["vitest run packages/domain/tests/adaptive-navigation.test.ts"],
+      "verification": [
+        "pnpm vitest run apps/admin/src/__tests__/admin.test.ts apps/presenter/src/__tests__/presenter.test.ts tests/integration/worker-api.test.ts",
+        "pnpm run verify"
+      ],
       "evidence": [
         {
           "type": "unit_test",
@@ -396,9 +498,44 @@
           "timestamp": "2026-10-18T20:44:53Z",
           "result": "passed",
           "assertions": 8
+        },
+        {
+          "type": "integration_test",
+          "target": "tests/integration/worker-api.test.ts",
+          "timestamp": "2026-10-19T15:45:00Z",
+          "result": "passed",
+          "assertions": 13
+        },
+        {
+          "type": "test_suite",
+          "target": "pnpm run verify",
+          "timestamp": "2026-10-19T15:45:00Z",
+          "result": "passed",
+          "assertions": 206
+        },
+        {
+          "type": "verification",
+          "target": "pnpm run verify after CodeRabbit PR #48 feedback",
+          "timestamp": "2026-10-19T14:40:09.358Z",
+          "result": "passed",
+          "assertions": 210
+        },
+        {
+          "type": "verification",
+          "target": "pnpm run verify after PR #48 review and CodeQL fixes",
+          "timestamp": "2026-10-19T14:45:52.854Z",
+          "result": "passed",
+          "assertions": 211
+        },
+        {
+          "type": "verification",
+          "target": "pnpm run verify and ./init.sh after PR #48 follow-up review findings",
+          "timestamp": "2026-10-19T15:40:20Z",
+          "result": "passed",
+          "assertions": 212
         }
       ],
-      "notes": "Presenter maintains authoritative control; automated suggestions require human confirmation."
+      "notes": "Admin-configurable D1-persisted rules validate stable source/target slide IDs and 2D destination coordinates. Poll closure emits navigation.suggested; the presenter explicitly accepts or dismisses it before navigation."
     },
     {
       "id": "SPEC-012",
@@ -600,7 +737,7 @@
       "title": "Automated testing",
       "user_visible_behavior": "Complete multi-tier automated test suite covering domain invariants, Worker/Durable Object SQLite boundaries, E2E multi-client navigation, and 500-1,000 participant load tests.",
       "status": "passing",
-      "verification": ["pnpm test"],
+      "verification": ["pnpm test", "pnpm run lint:dup"],
       "evidence": [
         {
           "type": "test_suite",
@@ -608,6 +745,13 @@
           "timestamp": "2026-10-18T20:45:30Z",
           "result": "passed",
           "assertions": 185
+        },
+        {
+          "type": "verification",
+          "target": "pnpm run verify and ./init.sh after aligning local duplication threshold with SonarCloud",
+          "timestamp": "2026-10-19T16:01:49Z",
+          "result": "passed",
+          "assertions": 212
         }
       ],
       "notes": "Continuous verification integrated with GitHub Actions CI."

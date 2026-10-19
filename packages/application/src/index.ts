@@ -1,5 +1,6 @@
 import {
   ALLOWED_REACTIONS,
+  stripHtmlFromText,
   type ActorRole,
   type AssetManifest,
   type AssetManifestEntry,
@@ -687,7 +688,7 @@ export class AgoraPlatformService {
 
     let displayName: string | undefined;
     if (rawDisplayName) {
-      const stripped = rawDisplayName.replace(/<[^>]*>/g, '').trim();
+      const stripped = stripHtmlFromText(rawDisplayName).trim();
       if (stripped.length > 0) {
         displayName = stripped.slice(0, 50);
       }
@@ -994,6 +995,9 @@ export class AgoraPlatformService {
       resultsRevealed: poll.resultsRevealed,
       totalResponses,
       countsByOptionId,
+      question: poll.question,
+      type: poll.type,
+      options: poll.options,
     };
   }
 

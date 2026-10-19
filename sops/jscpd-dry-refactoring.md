@@ -1,7 +1,7 @@
 # Standard Operating Procedure: jscpd & DRY Refactoring
 
 ## Overview
-Agora enforces a strict **< 10%** code duplication threshold across all packages, apps, harness infrastructure, and backend services. The `jscpd` tool is integrated into the mechanical verification pipeline (`harness/verify-duplication.mjs`) and configured via [`.jscpd.json`](../.jscpd.json).
+Agora enforces a **3% maximum total duplication threshold** to match SonarCloud's new-code duplication quality gate, plus a **10% per-file guard** across packages, apps, harness infrastructure, and backend services. The `jscpd` tool is integrated into the mechanical verification pipeline (`harness/verify-duplication.mjs`) and configured via [`.jscpd.json`](../.jscpd.json). SonarCloud measures changed code while this local detector measures the configured local source set, so the scope differs even though the total threshold is aligned.
 
 ## Running Duplication Checks
 Execute the duplication verification script directly:
@@ -21,7 +21,7 @@ npx jscpd --reporters ai --summary packages apps harness infrastructure
 - **`[~N ast]`**: Abstract Syntax Tree level structural duplication.
 
 ## Triage Checklist
-1. **Identify Hotspots**: Review the summary report for any files exceeding the `10%` threshold or total duplication exceeding `10%`.
+1. **Identify Hotspots**: Review the summary report for total duplication exceeding `3%` or any file exceeding the `10%` per-file guard.
 2. **Inspect Clone Pairs**: Examine the source blocks indicated by `jscpd`.
 3. **Determine Scope**:
    - Intra-file duplication: Extract private helper functions or loops.

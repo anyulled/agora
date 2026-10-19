@@ -17,7 +17,7 @@ import type {
   WordCloudAggregate,
   WordCloudPrompt,
 } from '@agora/contracts';
-import { ALLOWED_REACTIONS } from '@agora/contracts';
+import { ALLOWED_REACTIONS, stripHtmlFromText } from '@agora/contracts';
 
 export interface CreatePresentationInput {
   id: string;
@@ -195,7 +195,7 @@ export function computePresentationRevisionHash(input: RevisionHashInput): strin
  * Increments presentation revision identifier (e.g. rev-1 -> rev-2).
  */
 export function bumpRevision(currentRevision: string): string {
-  const match = currentRevision.match(/^(.*?)(\d+)$/);
+  const match = currentRevision.match(/^(.*?)(\d{1,9})$/);
   if (match) {
     const prefix = match[1] ?? '';
     const num = Number.parseInt(match[2] ?? '0', 10);
@@ -380,7 +380,10 @@ export function createLiveSession(
     throw new Error('Session ID is required');
   }
 
-  const cleanBase = baseUrl.replace(/\/+$/, '');
+  let cleanBase = baseUrl;
+  while (cleanBase.endsWith('/')) {
+    cleanBase = cleanBase.slice(0, -1);
+  }
   const audienceUrl = `${cleanBase}/session/${sessionId}`;
   const qrCodeDataUrl = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text x="10" y="50">QR:${sessionId}</text></svg>`;
   const status = options?.initialStatus ?? 'live';
@@ -582,11 +585,7 @@ export function canDownloadFullPdf(
 }
 
 function stripHtml(input: string): string {
-  return input
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]*>/g, '')
-    .trim();
+  return stripHtmlFromText(input);
 }
 
 /**
@@ -757,6 +756,9 @@ export function recordPollVote(
   if (!selectedOptionIds || selectedOptionIds.length === 0) {
     throw new Error('Must select at least one option');
   }
+  if (new Set(selectedOptionIds).size !== selectedOptionIds.length) {
+    throw new Error('Duplicate option selections are not allowed');
+  }
 
   const validOptionIds = new Set(poll.options.map((opt) => opt.id));
   for (const optionId of selectedOptionIds) {
@@ -765,7 +767,9 @@ export function recordPollVote(
     }
   }
 
-  if ((poll.type === 'single' || poll.type === 'binary') && selectedOptionIds.length !== 1) {
+  const isSingleOrBinary =
+    poll.type === 'single' || poll.type === 'single-choice' || poll.type === 'binary';
+  if (isSingleOrBinary && selectedOptionIds.length !== 1) {
     throw new Error(`Poll type '${poll.type}' requires exactly one selection`);
   }
 

@@ -1,6 +1,7 @@
 export declare function evaluateDuplicationOutput(
   rawOutput: string,
   maxThreshold?: number,
+  maxFileThreshold?: number,
 ): {
   valid: boolean;
   totalDuplicationPercent: number;
