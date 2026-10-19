@@ -11,18 +11,25 @@
 - Conventional Commits (`commitlint.config.mjs`), ESLint 9 strict flat configuration (`eslint.config.mjs`), `jscpd` code duplication detector (`<= 10%` threshold; 1.6% actual), Mermaid diagram validator (`harness/verify-mermaid.mjs`), OpenAPI 3.1.0 route verifier (`harness/verify-openapi.mjs`), Biome formatting/linting, and Git hooks are active and enforced locally and in CI.
 
 ## Changed This Session
-- Resolved TypeScript and lint errors in `apps/worker/src/index.ts` and `tests/integration/worker-api.test.ts`.
-- Configured `minimumReleaseAge: 0` in `pnpm-workspace.yaml` to ensure PR #43 (`bump vitest from 3.2.7 to 4.1.11`) passes CI without pnpm 11 package age cutoff failures.
-- Restored `SPEC-009` status in `feature_list.json` to passing.
-- Updated session documentation in `claude-progress.md` and `session-handoff.md`.
+- Implemented GitHub Issue #17 (`SPEC-009: Emoji reactions`):
+  - In `packages/contracts/src/index.ts`: exported `SlideReactionSummary`, `ReactionAddedPayload`, and `ReactionSummaryPayload`.
+  - In `packages/domain/src/index.ts`: added `emptyReactionCounts()`, `isValidReaction()`, `createSlideReactionSummary()`, `aggregateReactionCounts()`, and `batchAggregateReactions()`.
+  - In `apps/worker/src/index.ts`:
+    - Moved `RateLimiter` cleanly above `SessionCoordinatorDO`.
+    - Handled `reaction.added` over WebSockets with 10 req/s per-participant rate limits (`RATE_LIMIT_EXCEEDED`) and unrevealed slide access control (`SLIDE_NOT_REVEALED`).
+    - Added `recordReaction()` with 500ms batched aggregation broadcasting `reaction.summary`, `flushReactionSummaries()`, and `destroy()`.
+    - Delegated `POST /api/v1/sessions/:id/reactions` to `coordinator.recordReaction()`.
+  - In `apps/audience/src/index.ts`: added `sendReaction()` over WebSocket, `sendReactionToApi()` over REST, and `reaction.summary`/`reaction.added` handling.
+  - In `apps/presenter/src/index.ts`: added `getReactionsForCurrentSlide()`, `receiveReaction()`, reactive listeners (`subscribe()`), and live reaction HUD metrics.
+  - Added unit, integration, and performance tests verifying WebSocket dispatch, batch summaries, and p95 latency < 1s under 500 users.
+  - Closed GitHub issue #17.
 
 ## Broken Or Unverified
 - None. All 14 test suites (183 tests), ESLint/Biome/jscpd/Mermaid/OpenAPI linters, Three-Layer Victory Detector, and Cloudflare emulation tests pass cleanly.
 
 ## Next Best Step
-1. Commit changes to `main` with conventional commit message: `fix(worker): deduplicate RateLimiter and import ReactionSummaryPayload`.
-2. Push `main` to `origin/main`.
-3. Rebase `dependabot/npm_and_yarn/vitest-4.1.11` on `main` and push to origin to unblock and verify PR #43.
+1. Push `main` to `origin/main`.
+2. Proceed to next task or open issues in backlog.
 
 ## Reproducer & Verification Commands
 ```bash
