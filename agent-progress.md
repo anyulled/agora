@@ -1,5 +1,13 @@
 # Agora Engineering Progress Log
 
+## Session 029 — 2026-10-19
+- Implemented GitHub issue #19 (`SPEC-011: Adaptive navigation`) in the isolated `feat/issue-19-adaptive-navigation` worktree.
+- Added authenticated presentation settings endpoints to list, create, and delete adaptive navigation rules. Rules validate stable source/destination slide IDs, positive vote thresholds, optional percentage thresholds, and exact horizontal/vertical Reveal.js coordinates; D1 hydration/persistence preserves them.
+- Moved rule evaluation to poll closure. Matching outcomes broadcast `navigation.suggested`, while individual votes never navigate or prompt automatically.
+- Connected the presenter real-time event handler to render the existing prominent accept/dismiss banner. Acceptance reveals and navigates to the 2D destination; dismissal leaves the deck unchanged.
+- Updated OpenAPI contracts and added admin, presenter, and worker integration coverage.
+- Verified: `pnpm run format:check`, `pnpm run lint`, `pnpm run typecheck`, `pnpm run build`, `pnpm run test` (15 files, 206 tests), and `pnpm run harness:victory` passed.
+
 > Progress log adhering to Harness Engineering Practice 5.
 > Tracks session continuity, verified states, and cumulative system achievements.
 

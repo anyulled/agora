@@ -197,6 +197,19 @@ describe('PresenterAppController (SPEC-008, SPEC-011, SPEC-012, SPEC-023)', () =
       expect(state.activeSuggestion).not.toBeNull();
     });
 
+    it('receives a navigation.suggested event without automatically navigating', () => {
+      presenter.handleRealtimeEvent({
+        id: 'event-suggestion',
+        type: 'navigation.suggested',
+        sessionId: 'sess_1',
+        timestamp: new Date().toISOString(),
+        payload: mockSuggestion,
+      });
+
+      expect(presenter.getActiveSuggestion()?.targetSlideId).toBe('slide_1_detail');
+      expect(presenter.getCurrentSlide()?.id).toBe('slide_0');
+    });
+
     it('requires explicit confirmation before jumping to target slide', () => {
       presenter.setNavigationSuggestion(mockSuggestion);
       const jumped = presenter.acceptNavigationSuggestion();

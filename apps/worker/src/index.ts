@@ -4,7 +4,6 @@ import {
   type AudienceQuestion,
   type AudienceSafeSessionView,
   type NavigationRule,
-  type NavigationSuggestion,
   type ParticipantIdentity,
   type PollDefinition,
   type PollOption,
@@ -28,6 +27,7 @@ import {
   bumpRevision,
   computePresentationRevisionHash,
   createAudienceQuestion,
+  evaluateAdaptiveNavigationRules,
   isSlideRevealed,
   sortQuestions,
   startScheduledSession,
@@ -1020,6 +1020,74 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     }
   }
 
+  async function persistNavigationRuleToD1(
+    env: WorkerEnv | undefined,
+    rule: NavigationRule,
+  ): Promise<void> {
+    const db = asD1(env);
+    if (!db) return;
+
+    await db
+      .prepare(
+        `INSERT OR REPLACE INTO navigation_rules
+         (id, presentation_id, source_slide_id, poll_id, option_id, min_vote_threshold,
+          min_percentage_threshold, target_slide_id, target_horizontal_index, target_vertical_index)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        rule.id,
+        rule.presentationId,
+        rule.sourceSlideId,
+        rule.pollId,
+        rule.optionId,
+        rule.minVoteThreshold,
+        rule.minPercentageThreshold ?? null,
+        rule.targetSlideId,
+        rule.targetHorizontalIndex,
+        rule.targetVerticalIndex,
+      )
+      .run();
+  }
+
+  function validateNavigationRule(
+    rule: Omit<NavigationRule, 'id' | 'presentationId'>,
+    presentation: Presentation,
+  ): string | null {
+    const requiredFields: Array<[string, string]> = [
+      ['sourceSlideId', rule.sourceSlideId],
+      ['pollId', rule.pollId],
+      ['optionId', rule.optionId],
+      ['targetSlideId', rule.targetSlideId],
+    ];
+    if (requiredFields.some(([, value]) => typeof value !== 'string' || !sanitizeText(value))) {
+      return 'sourceSlideId, pollId, optionId, and targetSlideId are required';
+    }
+    if (!Number.isInteger(rule.minVoteThreshold) || rule.minVoteThreshold < 1) {
+      return 'minVoteThreshold must be a positive integer';
+    }
+    if (
+      rule.minPercentageThreshold !== undefined &&
+      (!Number.isFinite(rule.minPercentageThreshold) ||
+        rule.minPercentageThreshold < 0 ||
+        rule.minPercentageThreshold > 100)
+    ) {
+      return 'minPercentageThreshold must be between 0 and 100';
+    }
+
+    const sourceSlide = presentation.slides?.find((slide) => slide.id === rule.sourceSlideId);
+    const targetSlide = presentation.slides?.find((slide) => slide.id === rule.targetSlideId);
+    if (!sourceSlide || !targetSlide) {
+      return 'sourceSlideId and targetSlideId must reference slides in this presentation';
+    }
+    if (
+      rule.targetHorizontalIndex !== targetSlide.horizontalIndex ||
+      rule.targetVerticalIndex !== targetSlide.verticalIndex
+    ) {
+      return 'target coordinates must match the destination slide';
+    }
+    return null;
+  }
+
   async function hydratePresentationFromD1(
     env: WorkerEnv | undefined,
     id: string,
@@ -1088,6 +1156,28 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
     store.presentations.set(id, presentation);
     store.slides.set(id, slides);
     store.assets.set(id, assets);
+    const ruleRows = await db
+      .prepare('SELECT * FROM navigation_rules WHERE presentation_id = ? ORDER BY id ASC')
+      .bind(id)
+      .all<Record<string, unknown>>();
+    store.navigationRules.set(
+      id,
+      ruleRows.results.map((rule) => ({
+        id: String(rule.id),
+        presentationId: String(rule.presentation_id),
+        sourceSlideId: String(rule.source_slide_id),
+        pollId: String(rule.poll_id),
+        optionId: String(rule.option_id),
+        minVoteThreshold: Number(rule.min_vote_threshold),
+        minPercentageThreshold:
+          rule.min_percentage_threshold === null || rule.min_percentage_threshold === undefined
+            ? undefined
+            : Number(rule.min_percentage_threshold),
+        targetSlideId: String(rule.target_slide_id),
+        targetHorizontalIndex: Number(rule.target_horizontal_index),
+        targetVerticalIndex: Number(rule.target_vertical_index),
+      })),
+    );
     return presentation;
   }
 
@@ -1224,6 +1314,84 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
 
     // 2. GET /api/v1/presentations/:id
     const presMatch = path.match(/^\/api\/v1\/presentations\/([^/]+)$/);
+    const navigationRulesMatch = path.match(
+      /^\/api\/v1\/presentations\/([^/]+)\/navigation-rules$/,
+    );
+    if (navigationRulesMatch && method === 'GET') {
+      if (!authorizeAdmin(request)) {
+        return errorResponse('Unauthorized: Admin authentication required', 401);
+      }
+      const presentationId = navigationRulesMatch[1]!;
+      const presentation = await hydratePresentationFromD1(env, presentationId);
+      if (!presentation) return errorResponse('Presentation not found', 404);
+      return jsonResponse(store.navigationRules.get(presentationId) || []);
+    }
+
+    if (navigationRulesMatch && method === 'POST') {
+      if (!authorizeAdmin(request)) {
+        return errorResponse('Unauthorized: Admin authentication required', 401);
+      }
+      const presentationId = navigationRulesMatch[1]!;
+      const presentation = await hydratePresentationFromD1(env, presentationId);
+      if (!presentation) return errorResponse('Presentation not found', 404);
+
+      const rawBody = await request.json().catch(() => null);
+      if (rawBody === null || typeof rawBody !== 'object') {
+        return errorResponse('Invalid JSON request body', 400);
+      }
+      const input = rawBody as Partial<Omit<NavigationRule, 'id' | 'presentationId'>>;
+      const candidate = {
+        sourceSlideId: input.sourceSlideId ?? '',
+        pollId: input.pollId ?? '',
+        optionId: input.optionId ?? '',
+        minVoteThreshold: input.minVoteThreshold ?? 1,
+        minPercentageThreshold: input.minPercentageThreshold,
+        targetSlideId: input.targetSlideId ?? '',
+        targetHorizontalIndex: input.targetHorizontalIndex ?? Number.NaN,
+        targetVerticalIndex: input.targetVerticalIndex ?? Number.NaN,
+      };
+      const validationError = validateNavigationRule(candidate, presentation);
+      if (validationError) return errorResponse(validationError, 400);
+
+      const rule: NavigationRule = {
+        id: generateSecureId('nav-rule'),
+        presentationId,
+        ...candidate,
+      };
+      const rules = store.navigationRules.get(presentationId) || [];
+      rules.push(rule);
+      store.navigationRules.set(presentationId, rules);
+      await persistNavigationRuleToD1(env, rule);
+      return jsonResponse(rule, 201);
+    }
+
+    const navigationRuleMatch = path.match(
+      /^\/api\/v1\/presentations\/([^/]+)\/navigation-rules\/([^/]+)$/,
+    );
+    if (navigationRuleMatch && method === 'DELETE') {
+      if (!authorizeAdmin(request)) {
+        return errorResponse('Unauthorized: Admin authentication required', 401);
+      }
+      const [, presentationId, ruleId] = navigationRuleMatch;
+      const presentation = await hydratePresentationFromD1(env, presentationId!);
+      if (!presentation) return errorResponse('Presentation not found', 404);
+      const rules = store.navigationRules.get(presentationId!) || [];
+      if (!rules.some((rule) => rule.id === ruleId))
+        return errorResponse('Navigation rule not found', 404);
+      store.navigationRules.set(
+        presentationId!,
+        rules.filter((rule) => rule.id !== ruleId),
+      );
+      const db = asD1(env);
+      if (db) {
+        await db
+          .prepare('DELETE FROM navigation_rules WHERE id = ? AND presentation_id = ?')
+          .bind(ruleId!, presentationId!)
+          .run();
+      }
+      return jsonResponse({ ok: true, deleted: ruleId });
+    }
+
     if (method === 'GET' && presMatch) {
       const id = presMatch[1]!;
       const presentation = await hydratePresentationFromD1(env, id);
@@ -2165,7 +2333,17 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
             }
           : { pollId: poll.id, status: 'closed' };
       broadcastRealtimeEvent(sessionId!, eventType, eventPayload);
-      return jsonResponse(poll);
+      const suggestions =
+        action === 'close'
+          ? evaluateAdaptiveNavigationRules(
+              store.navigationRules.get(store.sessions.get(sessionId!)!.presentationId) || [],
+              buildPollResultsSummary(poll),
+            )
+          : [];
+      for (const suggestion of suggestions) {
+        broadcastRealtimeEvent(sessionId!, 'navigation.suggested', suggestion);
+      }
+      return jsonResponse({ ...poll, suggestions });
     }
 
     // 17e. POST /api/v1/sessions/:id/polls/:pollId/reveal (Presenter reveals poll results to projector/audience)
@@ -2202,7 +2380,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       return jsonResponse(summary);
     }
 
-    // 18. POST /api/v1/sessions/:id/polls/:pollId/vote (Attendee votes + adaptive navigation suggestion)
+    // 18. POST /api/v1/sessions/:id/polls/:pollId/vote (Attendee votes)
     const pollVoteMatch = path.match(/^\/api\/v1\/sessions\/([^/]+)\/polls\/([^/]+)\/vote$/);
     if (method === 'POST' && pollVoteMatch) {
       const sessionId = pollVoteMatch[1]!;
@@ -2281,7 +2459,6 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
       persistPollVoteToDO(env, sessionId, pollId, participant.id, selectedIds);
 
       const summary = buildPollResultsSummary(poll);
-      const counts = summary.countsByOptionId;
       const totalResponses = summary.totalResponses;
 
       broadcastRealtimeEvent(sessionId, 'poll.voted', {
@@ -2299,39 +2476,7 @@ export function createAgoraWorkerApp(options?: AgoraWorkerAppOptions) {
         });
       }
 
-      // Evaluate adaptive navigation rules for each selected option
-      const rules = store.navigationRules.get(session.presentationId) || [];
-      const suggestions: NavigationSuggestion[] = [];
-
-      for (const rule of rules) {
-        if (rule.pollId === pollId && selectedIds.includes(rule.optionId)) {
-          const voteCount = counts[rule.optionId] || 0;
-          const percentage = totalResponses > 0 ? (voteCount / totalResponses) * 100 : 0;
-
-          const meetsCount = voteCount >= rule.minVoteThreshold;
-          const meetsPercent =
-            rule.minPercentageThreshold !== undefined
-              ? percentage >= rule.minPercentageThreshold
-              : true;
-
-          if (meetsCount && meetsPercent) {
-            const suggestion: NavigationSuggestion = {
-              ruleId: rule.id,
-              sourceSlideId: rule.sourceSlideId,
-              pollId: rule.pollId,
-              optionId: rule.optionId,
-              targetSlideId: rule.targetSlideId,
-              targetHorizontalIndex: rule.targetHorizontalIndex,
-              targetVerticalIndex: rule.targetVerticalIndex,
-              reason: `Poll option reached ${voteCount} votes (${Math.round(percentage)}%)`,
-            };
-            suggestions.push(suggestion);
-            broadcastRealtimeEvent(sessionId, 'navigation.suggested', suggestion);
-          }
-        }
-      }
-
-      return jsonResponse({ ok: true, summary, suggestions });
+      return jsonResponse({ ok: true, summary });
     }
 
     // 19. POST /api/v1/sessions/:id/wordclouds (Presenter creates prompt)

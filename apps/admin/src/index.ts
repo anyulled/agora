@@ -3,6 +3,7 @@ import {
   safeUrlAttribute,
   type AssetManifest,
   type AssetManifestEntry,
+  type NavigationRule,
   type Presentation,
   type PresentationBranding,
   type PresentationSession,
@@ -35,6 +36,8 @@ export interface UpdatePresentationParams {
   branding?: PresentationBranding;
   endingSlideId?: string;
 }
+
+export type NavigationRuleInput = Omit<NavigationRule, 'id' | 'presentationId'>;
 
 export interface DeleteModalState {
   isOpen: boolean;
@@ -97,6 +100,7 @@ export interface AdminDashboardViewModel {
 export class AdminAppController {
   private presentations = new Map<string, Presentation>();
   private manifests = new Map<string, AssetManifest>();
+  private navigationRules = new Map<string, NavigationRule[]>();
   private activeSessions = new Map<string, PresentationSession>();
   private deleteModalState: DeleteModalState = {
     isOpen: false,
@@ -151,6 +155,7 @@ export class AdminAppController {
       revision: presentation.revision,
       slidePngs: {},
     });
+    this.navigationRules.set(id, []);
 
     return presentation;
   }
@@ -165,6 +170,57 @@ export class AdminAppController {
 
   getAssetManifest(presentationId: string): AssetManifest | null {
     return this.manifests.get(presentationId) ?? null;
+  }
+
+  getNavigationRules(presentationId: string): NavigationRule[] {
+    return (this.navigationRules.get(presentationId) ?? []).map((rule) => ({ ...rule }));
+  }
+
+  addNavigationRule(presentationId: string, input: NavigationRuleInput): NavigationRule {
+    const presentation = this.presentations.get(presentationId);
+    if (!presentation) throw new Error(`Presentation ${presentationId} not found`);
+
+    const sourceSlide = presentation.slides?.find((slide) => slide.id === input.sourceSlideId);
+    const targetSlide = presentation.slides?.find((slide) => slide.id === input.targetSlideId);
+    if (!sourceSlide || !targetSlide) {
+      throw new Error('Navigation rules must reference slides in the presentation');
+    }
+    if (
+      targetSlide.horizontalIndex !== input.targetHorizontalIndex ||
+      targetSlide.verticalIndex !== input.targetVerticalIndex
+    ) {
+      throw new Error('Navigation rule coordinates must match the destination slide');
+    }
+    if (!Number.isInteger(input.minVoteThreshold) || input.minVoteThreshold < 1) {
+      throw new Error('Navigation rule minVoteThreshold must be a positive integer');
+    }
+    if (
+      input.minPercentageThreshold !== undefined &&
+      (input.minPercentageThreshold < 0 || input.minPercentageThreshold > 100)
+    ) {
+      throw new Error('Navigation rule minPercentageThreshold must be between 0 and 100');
+    }
+
+    const rule: NavigationRule = {
+      id: this.generateId('nav_rule'),
+      presentationId,
+      ...input,
+    };
+    const rules = this.navigationRules.get(presentationId) ?? [];
+    rules.push(rule);
+    this.navigationRules.set(presentationId, rules);
+    return { ...rule };
+  }
+
+  removeNavigationRule(presentationId: string, ruleId: string): void {
+    const rules = this.navigationRules.get(presentationId);
+    if (!rules?.some((rule) => rule.id === ruleId)) {
+      throw new Error(`Navigation rule ${ruleId} not found in presentation ${presentationId}`);
+    }
+    this.navigationRules.set(
+      presentationId,
+      rules.filter((rule) => rule.id !== ruleId),
+    );
   }
 
   updatePresentation(id: string, updates: UpdatePresentationParams): Presentation {
@@ -320,6 +376,7 @@ export class AdminAppController {
 
     this.presentations.delete(id);
     this.manifests.delete(id);
+    this.navigationRules.delete(id);
     this.activeSessions.delete(id);
     this.cancelDeletePresentation();
 

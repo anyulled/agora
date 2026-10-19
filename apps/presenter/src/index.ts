@@ -294,6 +294,7 @@ export class PresenterAppController {
   // Adaptive navigation (SPEC-011)
   setNavigationSuggestion(suggestion: NavigationSuggestion | null): void {
     this.activeSuggestion = suggestion ? { ...suggestion } : null;
+    this.notifyListeners();
   }
 
   getActiveSuggestion(): NavigationSuggestion | null {
@@ -305,11 +306,13 @@ export class PresenterAppController {
     const { targetHorizontalIndex, targetVerticalIndex } = this.activeSuggestion;
     const success = this.applySlideTransition(targetHorizontalIndex, targetVerticalIndex);
     this.activeSuggestion = null;
+    this.notifyListeners();
     return success;
   }
 
   dismissNavigationSuggestion(): void {
     this.activeSuggestion = null;
+    this.notifyListeners();
   }
 
   // Embedded Q&A Slide Controller (SPEC-008)
@@ -321,7 +324,9 @@ export class PresenterAppController {
   handleRealtimeEvent(event: RealtimeEvent): void {
     if (!event || event.sessionId !== this.session.id) return;
 
-    if (event.type === 'question.submitted') {
+    if (event.type === 'navigation.suggested') {
+      this.setNavigationSuggestion(event.payload as NavigationSuggestion);
+    } else if (event.type === 'question.submitted') {
       const q = event.payload as AudienceQuestion;
       if (q?.id) {
         this.questions = this.questions.filter((item) => item.id !== q.id).concat(q);

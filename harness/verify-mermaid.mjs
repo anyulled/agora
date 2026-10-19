@@ -188,4 +188,5 @@ if (isMain) {
   console.log(
     `✅ Mermaid validation passed (${report.diagramsValidated} diagram(s) across ${report.filesChecked} Markdown file(s)).`,
   );
+  process.exit(0);
 }

@@ -404,7 +404,10 @@
       "title": "Adaptive navigation",
       "user_visible_behavior": "Allows defining branch rules based on slide IDs, poll outcomes, or vote thresholds. Matching rules emit suggestions to presenter, who must explicitly confirm before the deck branches. Visiting destination reveals that slide while keeping skipped branches unrevealed.",
       "status": "passing",
-      "verification": ["vitest run packages/domain/tests/adaptive-navigation.test.ts"],
+      "verification": [
+        "pnpm vitest run apps/admin/src/__tests__/admin.test.ts apps/presenter/src/__tests__/presenter.test.ts tests/integration/worker-api.test.ts",
+        "pnpm run verify"
+      ],
       "evidence": [
         {
           "type": "unit_test",
@@ -412,9 +415,23 @@
           "timestamp": "2026-10-18T20:44:53Z",
           "result": "passed",
           "assertions": 8
+        },
+        {
+          "type": "integration_test",
+          "target": "tests/integration/worker-api.test.ts",
+          "timestamp": "2026-10-19T15:45:00Z",
+          "result": "passed",
+          "assertions": 13
+        },
+        {
+          "type": "test_suite",
+          "target": "pnpm run verify",
+          "timestamp": "2026-10-19T15:45:00Z",
+          "result": "passed",
+          "assertions": 206
         }
       ],
-      "notes": "Presenter maintains authoritative control; automated suggestions require human confirmation."
+      "notes": "Admin-configurable D1-persisted rules validate stable source/target slide IDs and 2D destination coordinates. Poll closure emits navigation.suggested; the presenter explicitly accepts or dismisses it before navigation."
     },
     {
       "id": "SPEC-012",
