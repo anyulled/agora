@@ -141,7 +141,66 @@ export async function provisionInfrastructure(options = {}) {
     );
   }
 
-  // 3. Update wrangler.toml with resolved database_id
+  // 3. Verify / Configure workers.dev Subdomain
+  console.log('--> Checking workers.dev subdomain...');
+  let workersSubdomain = null;
+  try {
+    const subdomainRes = await fetchFn(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/subdomain`,
+      { method: 'GET', headers },
+    );
+    if (subdomainRes.ok) {
+      const subData = await subdomainRes.json();
+      workersSubdomain = subData.result?.subdomain || null;
+    }
+  } catch {
+    // Ignore network error in dry-run/mock environments
+  }
+
+  const requestedSubdomain = options.workersSubdomain || process.env.CLOUDFLARE_WORKERS_SUBDOMAIN;
+  if (!workersSubdomain && requestedSubdomain) {
+    console.log(`    [+] Registering requested workers.dev subdomain: '${requestedSubdomain}'...`);
+    try {
+      const putSubdomainRes = await fetchFn(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/subdomain`,
+        {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({ subdomain: requestedSubdomain }),
+        },
+      );
+      if (putSubdomainRes.ok) {
+        workersSubdomain = requestedSubdomain;
+        console.log(
+          `    [CREATED] Registered workers.dev subdomain: ${workersSubdomain}.workers.dev`,
+        );
+      } else {
+        const errText = await putSubdomainRes.text();
+        console.warn(`    [WARN] Could not register workers.dev subdomain: ${errText}`);
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  if (workersSubdomain) {
+    console.log(`    [OK] workers.dev subdomain: ${workersSubdomain}.workers.dev`);
+    console.log(
+      `    [URL] Worker URL will be: https://agora-worker.${workersSubdomain}.workers.dev`,
+    );
+  } else {
+    console.log(
+      '    [ACTION REQUIRED] No workers.dev subdomain is registered on this Cloudflare account.',
+    );
+    console.log(
+      `    --> Register your free subdomain in Cloudflare Dashboard: https://dash.cloudflare.com/${accountId}/workers/onboarding`,
+    );
+    console.log(
+      '    --> Or add CLOUDFLARE_WORKERS_SUBDOMAIN to GitHub Secrets to register it via CI.',
+    );
+  }
+
+  // 4. Update wrangler.toml with resolved database_id
   console.log(`--> Synchronizing wrangler configuration at ${wranglerPath}...`);
   if (!fs.existsSync(wranglerPath)) {
     throw new Error(`Wrangler configuration file not found at: ${wranglerPath}`);
@@ -179,6 +238,7 @@ export async function provisionInfrastructure(options = {}) {
     d1DatabaseName,
     d1DatabaseId,
     r2BucketName,
+    workersSubdomain,
   };
 }
 

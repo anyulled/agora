@@ -176,4 +176,54 @@ bucket_name = 'agora-assets'
     const updatedContent = fs.readFileSync(testWranglerPath, 'utf8');
     expect(updatedContent).toContain("database_id = 'explicit-uuid-5555'");
   });
+
+  it('registers workers.dev subdomain if not present and requestedSubdomain is provided', async () => {
+    const apiCalls: { url: string; method: string; body?: unknown }[] = [];
+
+    const mockFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      apiCalls.push({ url, method, body });
+
+      if (url.includes('/r2/buckets/agora-assets')) {
+        return new Response(JSON.stringify({ result: { name: 'agora-assets' }, success: true }), {
+          status: 200,
+        });
+      }
+
+      if (url.endsWith('/workers/subdomain') && method === 'GET') {
+        return new Response(JSON.stringify({ result: null, success: true }), { status: 200 });
+      }
+
+      if (url.endsWith('/workers/subdomain') && method === 'PUT') {
+        return new Response(
+          JSON.stringify({
+            result: { subdomain: (body as { subdomain?: string })?.subdomain },
+            success: true,
+          }),
+          { status: 200 },
+        );
+      }
+
+      return new Response('Not Found', { status: 404 });
+    };
+
+    const result = await provisionInfrastructure({
+      accountId: 'test-account-123',
+      apiToken: 'test-token-456',
+      d1DatabaseId: 'd1-subdomain-test-id',
+      r2BucketName: 'agora-assets',
+      workersSubdomain: 'my-agora-subdomain',
+      wranglerPath: testWranglerPath,
+      fetchFn: mockFetch as typeof fetch,
+    });
+
+    expect(result.workersSubdomain).toBe('my-agora-subdomain');
+    const putSubdomain = apiCalls.find(
+      (c) => c.url.endsWith('/workers/subdomain') && c.method === 'PUT',
+    );
+    expect(putSubdomain).toBeDefined();
+    expect((putSubdomain?.body as { subdomain?: string })?.subdomain).toBe('my-agora-subdomain');
+  });
 });

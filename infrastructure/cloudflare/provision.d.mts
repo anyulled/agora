@@ -4,6 +4,7 @@ export interface ProvisionOptions {
   d1DatabaseName?: string;
   d1DatabaseId?: string;
   r2BucketName?: string;
+  workersSubdomain?: string;
   wranglerPath?: string;
   fetchFn?: typeof fetch;
 }
@@ -13,6 +14,7 @@ export interface ProvisionResult {
   d1DatabaseName: string;
   d1DatabaseId: string;
   r2BucketName: string;
+  workersSubdomain?: string | null;
 }
 
 export function provisionInfrastructure(options?: ProvisionOptions): Promise<ProvisionResult>;

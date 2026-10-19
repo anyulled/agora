@@ -441,13 +441,16 @@
 - **Completed**:
   - Identified root cause in `wrangler-action`: in monorepos with subdirectories lacking `package.json`, `wrangler-action` falls back to `npm i wrangler@3.90.0`, crashing npm's arborist on pnpm symlinked virtual stores.
   - Installed `wrangler: ^4.151.1` as root devDependency, configured `workerd: true` under `allowBuilds` and `onlyBuiltDependencies` in `pnpm-workspace.yaml`.
-  - Added npm scripts `"cf:migrate"` and `"cf:deploy"` in root `package.json`.
   - Updated `.github/workflows/deploy.yml` to execute `pnpm exec wrangler d1 migrations apply DB --remote --cwd infrastructure/cloudflare` and `pnpm exec wrangler deploy --cwd infrastructure/cloudflare`.
-  - Verified local migration execution (`0001_initial.sql`), dry-run deployment bundling (`pnpm exec wrangler deploy --dry-run`), and canonical `./init.sh` (14/14 test suites, 183 tests passing).
+  - Added automated `workers.dev` subdomain resolution and optional registration via `provision.mjs` with `CLOUDFLARE_WORKERS_SUBDOMAIN` support.
+  - Added unit test in `tests/integration/cloudflare-provision.test.ts` verifying subdomain registration (5/5 tests passing).
+  - Verified local migration execution (`0001_initial.sql`), remote D1 migration in CI (9 commands executed successfully, `0001_initial.sql` applied ✅), dry-run deployment bundling (`pnpm exec wrangler deploy --dry-run`), and canonical `./init.sh` (14/14 test suites, 184 tests passing).
 - **Verification Evidence**:
   - `pnpm exec wrangler deploy --dry-run --cwd infrastructure/cloudflare`: Bundles Worker cleanly with all bindings (SESSION_COORDINATOR, DB, ASSETS_BUCKET, ENVIRONMENT, ADMIN_TOKEN).
-  - `./init.sh`: 14/14 test suites (183 tests) passing.
+  - CI Run `39231622069`: Step "Apply D1 Database Migrations" succeeded applying remote D1 migrations cleanly.
+  - `./init.sh`: 14/14 test suites (184 tests) passing.
   - `pnpm run harness:victory`: 🏆 VICTORY DETECTED (All 3 termination layers verified successfully).
+
 
 
 
