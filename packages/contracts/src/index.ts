@@ -193,6 +193,25 @@ export interface WordCloudAggregate {
 
 export type ReactionCounts = Record<Reaction, number>;
 
+export interface SlideReactionSummary {
+  slideId: string;
+  counts: Record<Reaction, number>;
+  timestamp: string;
+}
+
+export interface ReactionAddedPayload {
+  slideId: string;
+  reaction: Reaction;
+  participantId?: string;
+  counts?: ReactionCounts;
+}
+
+export interface ReactionSummaryPayload {
+  slideId: string;
+  counts: Record<Reaction, number>;
+  timestamp?: string;
+}
+
 export type RealtimeEventType =
   | 'session.joined'
   | 'session.state'

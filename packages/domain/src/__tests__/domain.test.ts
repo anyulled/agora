@@ -11,7 +11,9 @@ import type {
 import { describe, expect, it } from 'vitest';
 import {
   RateLimiter,
+  aggregateReactionCounts,
   aggregateWordCloudSubmissions,
+  batchAggregateReactions,
   bumpRevision,
   canDownloadFullPdf,
   canDownloadSlidePng,
@@ -19,12 +21,15 @@ import {
   createAudienceQuestion,
   createLiveSession,
   createPresentation,
+  createSlideReactionSummary,
   duplicatePresentation,
   editPresentationSlide,
+  emptyReactionCounts,
   evaluateAdaptiveNavigationRules,
   getSoloNavigableSlides,
   isQuestionUpvotedBy,
   isSlideRevealed,
+  isValidReaction,
   navigatePresenterSlide,
   navigateSoloMode,
   normalizeWordCloudTerm,
@@ -745,6 +750,86 @@ describe('Domain Logic — SPEC-001 through SPEC-024', () => {
         { term: 'scalable', count: 2 },
         { term: 'resilient', count: 1 },
       ]);
+    });
+  });
+
+  describe('SPEC-009: Emoji reactions and batch aggregation', () => {
+    it('validates allowed emoji reactions and rejects invalid emojis', () => {
+      expect(isValidReaction('👍')).toBe(true);
+      expect(isValidReaction('🤔')).toBe(true);
+      expect(isValidReaction('❤️')).toBe(true);
+      expect(isValidReaction('😴')).toBe(true);
+
+      expect(isValidReaction('🔥')).toBe(false);
+      expect(isValidReaction('🎉')).toBe(false);
+      expect(isValidReaction('')).toBe(false);
+      expect(isValidReaction(null)).toBe(false);
+      expect(isValidReaction(123)).toBe(false);
+    });
+
+    it('initializes empty reaction counts with all 4 emojis at zero', () => {
+      const counts = emptyReactionCounts();
+      expect(counts).toEqual({
+        '👍': 0,
+        '🤔': 0,
+        '❤️': 0,
+        '😴': 0,
+      });
+    });
+
+    it('creates slide reaction summary with default zero counts and bound slideId', () => {
+      const summary = createSlideReactionSummary('slide-intro', { '👍': 3 });
+      expect(summary.slideId).toBe('slide-intro');
+      expect(summary.counts).toEqual({
+        '👍': 3,
+        '🤔': 0,
+        '❤️': 0,
+        '😴': 0,
+      });
+      expect(typeof summary.timestamp).toBe('string');
+    });
+
+    it('increments reaction counts immutably and rejects invalid reactions', () => {
+      const initial = emptyReactionCounts();
+      const updated = aggregateReactionCounts(initial, '👍');
+      expect(updated['👍']).toBe(1);
+      expect(initial['👍']).toBe(0); // Immutability verified
+
+      const updated2 = aggregateReactionCounts(updated, '❤️');
+      expect(updated2['👍']).toBe(1);
+      expect(updated2['❤️']).toBe(1);
+
+      // @ts-expect-error Testing runtime invalid reaction
+      expect(() => aggregateReactionCounts(initial, '🚀')).toThrow(/Invalid reaction/);
+    });
+
+    it('batch aggregates incoming reactions across multiple events', () => {
+      const initial = emptyReactionCounts();
+      const batch = ['👍', '❤️', '👍', '🤔', '😴', '❤️', '👍'] as const;
+      const aggregated = batchAggregateReactions(initial, batch);
+
+      expect(aggregated).toEqual({
+        '👍': 3,
+        '🤔': 1,
+        '❤️': 2,
+        '😴': 1,
+      });
+    });
+
+    it('enforces sliding-window rate limiter per participant to prevent reaction spam', () => {
+      const limiter = new RateLimiter({ windowMs: 1000, maxRequests: 3 });
+      const participantId = 'user-spammy';
+      const t0 = 1000;
+
+      expect(limiter.consume(participantId, t0)).toBe(true);
+      expect(limiter.consume(participantId, t0 + 100)).toBe(true);
+      expect(limiter.consume(participantId, t0 + 200)).toBe(true);
+      // Exceeds maxRequests = 3
+      expect(limiter.consume(participantId, t0 + 300)).toBe(false);
+      expect(limiter.check(participantId, t0 + 300)).toBe(false);
+
+      // After windowMs (1000ms), bucket purges
+      expect(limiter.consume(participantId, t0 + 1050)).toBe(true);
     });
   });
 });

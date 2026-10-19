@@ -10,7 +10,7 @@ ADMIN_TOKEN = 'agora-admin-secret-token'
 [[d1_databases]]
 binding = 'DB'
 database_name = 'agora-d1'
-database_id = 'agora-d1-production'
+database_id = 'a066cbdd-45ba-4408-be56-74a7f00c4bc1'
 migrations_dir = 'migrations'
 
 [[r2_buckets]]

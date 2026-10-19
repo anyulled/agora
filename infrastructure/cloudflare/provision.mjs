@@ -131,6 +131,11 @@ export async function provisionInfrastructure(options = {}) {
     console.log(`    [CREATED] R2 bucket '${r2BucketName}' successfully created.`);
   } else {
     const errorText = await r2GetRes.text();
+    if (r2GetRes.status === 403 && errorText.includes('Please enable R2')) {
+      throw new Error(
+        "Cloudflare R2 is not yet enabled for this account. Please open your Cloudflare Dashboard, navigate to 'R2 Object Storage' in the sidebar, and click 'Get Started' (or 'Enable R2') to activate the R2 service.",
+      );
+    }
     throw new Error(
       `Failed to verify Cloudflare R2 bucket (status ${r2GetRes.status}): ${errorText}`,
     );

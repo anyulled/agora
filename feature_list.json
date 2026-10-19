@@ -312,7 +312,7 @@
       "area": "interactions",
       "title": "Emoji reactions",
       "user_visible_behavior": "Attendees can trigger emoji reactions (👍, 🤔, ❤️, 😴) against the active slide. Server rate-limits submissions and aggregates counts at 500ms intervals, streaming updates to presenter view without disturbing audience navigation.",
-      "status": "passing",
+      "status": "in_progress",
       "verification": [
         "vitest run packages/domain/tests/reactions.test.ts",
         "vitest run apps/worker/tests/reactions-aggregator.test.ts"

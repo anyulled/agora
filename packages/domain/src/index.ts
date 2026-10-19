@@ -10,10 +10,14 @@ import type {
   PresentationBranding,
   PresentationSession,
   PresentationStatus,
+  Reaction,
+  ReactionCounts,
   SlideMetadata,
+  SlideReactionSummary,
   WordCloudAggregate,
   WordCloudPrompt,
 } from '@agora/contracts';
+import { ALLOWED_REACTIONS } from '@agora/contracts';
 
 export interface CreatePresentationInput {
   id: string;
@@ -923,4 +927,64 @@ export class RateLimiter {
       this.buckets.clear();
     }
   }
+}
+
+/**
+ * SPEC-009: Emoji reaction utilities and batch aggregation.
+ */
+export function emptyReactionCounts(): ReactionCounts {
+  return {
+    '👍': 0,
+    '🤔': 0,
+    '❤️': 0,
+    '😴': 0,
+  };
+}
+
+export function isValidReaction(reaction: unknown): reaction is Reaction {
+  return (
+    typeof reaction === 'string' && (ALLOWED_REACTIONS as readonly string[]).includes(reaction)
+  );
+}
+
+export function createSlideReactionSummary(
+  slideId: string,
+  counts?: Partial<ReactionCounts>,
+  timestamp: string = new Date().toISOString(),
+): SlideReactionSummary {
+  const merged: ReactionCounts = {
+    ...emptyReactionCounts(),
+    ...counts,
+  };
+  return {
+    slideId,
+    counts: merged,
+    timestamp,
+  };
+}
+
+export function aggregateReactionCounts(
+  current: ReactionCounts,
+  reaction: Reaction,
+): ReactionCounts {
+  if (!isValidReaction(reaction)) {
+    throw new Error(`Invalid reaction '${reaction}'`);
+  }
+  return {
+    ...current,
+    [reaction]: (current[reaction] ?? 0) + 1,
+  };
+}
+
+export function batchAggregateReactions(
+  current: ReactionCounts,
+  incoming: readonly Reaction[],
+): ReactionCounts {
+  const result: ReactionCounts = { ...current };
+  for (const reaction of incoming) {
+    if (isValidReaction(reaction)) {
+      result[reaction] = (result[reaction] ?? 0) + 1;
+    }
+  }
+  return result;
 }

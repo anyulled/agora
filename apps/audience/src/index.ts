@@ -317,17 +317,22 @@ export class AudienceAppController {
 
       case 'reaction.summary': {
         const payload = event.payload as
-          | { slideId?: string; counts?: ReactionCounts }
+          | { slideId?: string; counts?: ReactionCounts; summary?: ReactionCounts }
           | Record<string, ReactionCounts>;
         if (payload && typeof payload === 'object') {
-          const candidate = payload as { slideId?: unknown; counts?: unknown };
+          const candidate = payload as {
+            slideId?: unknown;
+            counts?: unknown;
+            summary?: unknown;
+          };
+          const resolvedCounts = candidate.counts ?? candidate.summary;
           if (
             typeof candidate.slideId === 'string' &&
-            candidate.counts &&
-            typeof candidate.counts === 'object'
+            resolvedCounts &&
+            typeof resolvedCounts === 'object'
           ) {
             this.reactionsBySlide.set(candidate.slideId, {
-              ...(candidate.counts as ReactionCounts),
+              ...(resolvedCounts as ReactionCounts),
             });
           } else {
             for (const [sId, counts] of Object.entries(payload)) {
@@ -335,6 +340,28 @@ export class AudienceAppController {
                 this.reactionsBySlide.set(sId, { ...(counts as ReactionCounts) });
               }
             }
+          }
+          this.notifyListeners();
+        }
+        break;
+      }
+
+      case 'reaction.added': {
+        const payload = event.payload as {
+          slideId?: string;
+          reaction?: Reaction;
+          counts?: ReactionCounts;
+        };
+        if (payload?.slideId) {
+          if (payload.counts && typeof payload.counts === 'object') {
+            this.reactionsBySlide.set(payload.slideId, { ...payload.counts });
+          } else if (payload.reaction && ALLOWED_REACTIONS.includes(payload.reaction)) {
+            let counts = this.reactionsBySlide.get(payload.slideId);
+            if (!counts) {
+              counts = { '👍': 0, '🤔': 0, '❤️': 0, '😴': 0 };
+              this.reactionsBySlide.set(payload.slideId, counts);
+            }
+            counts[payload.reaction] += 1;
           }
           this.notifyListeners();
         }
@@ -807,7 +834,83 @@ export class AudienceAppController {
     }
 
     counts[reaction] += 1;
+
+    // Send reaction.added over WebSocket if connected
+    if (this.ws && (this.ws.readyState === undefined || this.ws.readyState === 1)) {
+      try {
+        this.ws.send(
+          JSON.stringify({
+            type: 'reaction.added',
+            token: this.participant.token,
+            payload: {
+              slideId: activeSlide.id,
+              reaction,
+            },
+          }),
+        );
+      } catch {
+        // Safe fallback if socket send fails
+      }
+    }
+
     this.notifyListeners();
+  }
+
+  // SPEC-009: Asynchronous reaction submission via HTTP API to backend
+  async sendReactionToApi(reaction: Reaction, fetchFn?: typeof fetch): Promise<ReactionCounts> {
+    if (!ALLOWED_REACTIONS.includes(reaction)) {
+      throw new Error(`Invalid reaction: ${reaction}`);
+    }
+
+    const activeSlide = this.getActiveSlide();
+    if (!activeSlide) {
+      return this.getReactionsForActiveSlide();
+    }
+
+    const endpoint = this.wsConfig?.endpoint;
+    const fetcher =
+      fetchFn ?? this.wsConfig?.fetchFn ?? (typeof fetch !== 'undefined' ? fetch : undefined);
+
+    if (!endpoint || !fetcher) {
+      this.sendReaction(reaction);
+      return this.getReactionsForActiveSlide();
+    }
+
+    const cleanEndpoint = endpoint.replace(/\/+$/, '');
+    const res = await fetcher(
+      `${cleanEndpoint}/api/v1/sessions/${encodeURIComponent(this.sessionId)}/reactions`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.participant.token}`,
+        },
+        body: JSON.stringify({
+          slideId: activeSlide.id,
+          reaction,
+        }),
+      },
+    );
+
+    if (!res.ok) {
+      const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(errBody.error || `Failed to submit reaction: ${res.statusText}`);
+    }
+
+    const result = (await res.json()) as { ok?: boolean; summary?: ReactionCounts };
+    if (result.summary) {
+      this.reactionsBySlide.set(activeSlide.id, { ...result.summary });
+    } else {
+      let counts = this.reactionsBySlide.get(activeSlide.id);
+      if (!counts) {
+        counts = { '👍': 0, '🤔': 0, '❤️': 0, '😴': 0 };
+        this.reactionsBySlide.set(activeSlide.id, counts);
+      }
+      counts[reaction] += 1;
+    }
+
+    this.notifyListeners();
+    return this.getReactionsForActiveSlide();
   }
 
   getReactionsForActiveSlide(): ReactionCounts {

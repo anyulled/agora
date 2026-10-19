@@ -7,7 +7,7 @@
 - **Workspace**: `/Users/alrs/Documents/agora`
 - **Harness Status**: Active (14 Practices instantiated)
 - **Feature State**: 24/24 features specified in `feature_list.json` (all SPEC-001 through SPEC-024)
-- **Active Working Feature (WIP=1)**: None (`in_progress` count = 0)
+- **Active Working Feature (WIP=1)**: SPEC-009: Emoji reactions (`in_progress` count = 1)
 - **Architecture Integrity**: Clean Architecture strictly verified; pure domain boundaries in `packages/domain` and `packages/application`
 
 ---
